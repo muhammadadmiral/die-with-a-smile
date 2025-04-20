@@ -10,7 +10,7 @@ const AudioPlayer = ({
   isPlaying,
   currentTime,
 }) => {
-  // Minimal state
+  // State
   const [loadingState, setLoadingState] = useState("loading");
 
   // Refs
