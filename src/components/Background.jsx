@@ -1,535 +1,543 @@
-import { useEffect, useRef, useState } from "react"
-import { debounce } from "../lib/utils"
+import { useEffect, useRef, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 
+// Simplified yet enhanced Background component without mouse influence
 const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
-  const canvasRef = useRef(null)
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
-  const [isMoving, setIsMoving] = useState(false)
-  const starsRef = useRef([])
-  const particlesRef = useRef([])
-  const lastRenderTimeRef = useRef(0)
-  const requestRef = useRef(null)
-  const canvasContextRef = useRef(null)
-  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 })
-  const pulseEffectRef = useRef(0)
-  const starFieldOpacityRef = useRef(1)
-  const glowIntensityRef = useRef({ current: 0.5, target: 0.5 })
-  const backgroundHueRef = useRef(280) // Initial purple-ish hue
-  const [mobileMode, setMobileMode] = useState(false)
-  const isMountedRef = useRef(true)
+  // State
+  const [windowSize, setWindowSize] = useState({ 
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800 
+  });
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
-  // Track mouse movement for interactive effects
+  // Refs
+  const canvasRef = useRef(null);
+  const starsRef = useRef([]);
+  const particlesRef = useRef([]);
+  const requestRef = useRef(null);
+  const contextRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const lastRenderTimeRef = useRef(0);
+  const hueRef = useRef(280); // Initial color: purple
+  const intensityRef = useRef({ current: 0.5, target: 0.5 });
+  const lyricsInfluenceRef = useRef({ x: 0, y: 0, strength: 0 });
+
+  // Cleanup
   useEffect(() => {
-    const handleMouseMove = debounce((e) => {
-      if (!isMountedRef.current) return
-      setMousePosition({
-        x: e.clientX,
-        y: e.clientY,
-      })
-      setIsMoving(true)
-
-      // Reset moving state after a short delay
-      setTimeout(() => {
-        if (isMountedRef.current) {
-          setIsMoving(false)
-        }
-      }, 100)
-    }, 50)
-
-    window.addEventListener("mousemove", handleMouseMove)
-
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove)
-    }
-  }, [])
+      isMountedRef.current = false;
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, []);
 
-  // Handle window resize
+  // Handle resize
   useEffect(() => {
     const handleResize = () => {
-      if (!isMountedRef.current) return
-      const width = window.innerWidth
-      const height = window.innerHeight
-
+      if (!isMountedRef.current) return;
+      
       setWindowSize({
-        width,
-        height,
-      })
+        width: window.innerWidth,
+        height: window.innerHeight
+      });
+      setIsMobile(window.innerWidth < 768);
+    };
 
-      // Set mobile mode for responsive handling
-      setMobileMode(width < 768)
-    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
-    handleResize() // Initialize on mount
-
-    window.addEventListener("resize", handleResize)
-
-    return () => {
-      window.removeEventListener("resize", handleResize)
-    }
-  }, [])
-
-  // Initialize canvas and stars
+  // Update colors and intensity based on chorus and lyrics
   useEffect(() => {
-    if (!canvasRef.current) return
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext("2d", { alpha: true })
-    canvasContextRef.current = ctx
-
-    // Set canvas size to window size
-    const resizeCanvas = () => {
-      if (!canvas || !isMountedRef.current) return
-      canvas.width = window.innerWidth
-      canvas.height = window.innerHeight
-    }
-
-    resizeCanvas()
-
-    // Initialize stars - density based on viewport size
-    const initStars = () => {
-      if (!canvas || !isMountedRef.current) return
-      const starDensity = mobileMode ? 0.00012 : 0.00018 // Increased density
-      const starCount = Math.floor(canvas.width * canvas.height * starDensity)
-
-      const stars = []
-      for (let i = 0; i < starCount; i++) {
-        stars.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          size: Math.random() * 2 + 0.5, // Slightly larger stars
-          speed: Math.random() * 0.05 + 0.01, // Faster movement
-          brightness: Math.random() * 0.7 + 0.3,
-          pulse: Math.random() * 0.02 + 0.01,
-          pulseDelta: Math.random() * 0.005 + 0.002,
-          hue: Math.random() * 60 + backgroundHueRef.current, // Based on current background hue
-          opacity: Math.random() * 0.5 + 0.5,
-          twinkle: Math.random() > 0.5, // More stars twinkle
-          twinkleSpeed: Math.random() * 0.1 + 0.05,
-        })
-      }
-
-      starsRef.current = stars
-    }
-
-    // Initialize particles - more for visual impact
-    const initParticles = () => {
-      if (!canvas || !isMountedRef.current) return
-      const particleDensity = mobileMode ? 0.00003 : 0.00005 // Increased density
-      const particleCount = Math.floor(canvas.width * canvas.height * particleDensity)
-
-      const particles = []
-      for (let i = 0; i < particleCount; i++) {
-        particles.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          size: Math.random() * 4 + 1, // Larger particles
-          speed: Math.random() * 0.3 + 0.1, // Faster movement
-          directionX: Math.random() * 2 - 1,
-          directionY: Math.random() * 2 - 1,
-          hue: Math.random() * 60 + backgroundHueRef.current,
-          opacity: Math.random() * 0.3 + 0.1, // More visible
-          decay: Math.random() * 0.01 + 0.005,
-        })
-      }
-
-      particlesRef.current = particles
-    }
-
-    // Set up canvas and initialize elements
-    const resizeHandler = () => {
-      resizeCanvas()
-      initStars()
-      initParticles()
-    }
-
-    window.addEventListener("resize", resizeHandler)
-
-    initStars()
-    initParticles()
-
-    return () => {
-      isMountedRef.current = false
-      window.removeEventListener("resize", resizeHandler)
-
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current)
-        requestRef.current = null
-      }
-    }
-  }, [mobileMode])
-
-  // Update background hue and glow based on chorus
-  useEffect(() => {
-    if (isChorus) {
-      // Shift towards pink/red for chorus
-      backgroundHueRef.current = 320
-      glowIntensityRef.current.target = 0.8
+    // Update color hue based on chorus status
+    hueRef.current = isChorus ? 320 : 280; // Pink for chorus, purple for verse
+    
+    // Update intensity based on chorus status
+    intensityRef.current.target = isChorus ? 0.8 : 0.5;
+    
+    // Update lyrics influence
+    if (currentLyric && currentLyric !== "...") {
+      // Create a gentle flow effect based on lyrics content
+      const lyricLength = currentLyric.length;
+      const influenceX = Math.sin(lyricLength * 0.2) * windowSize.width * 0.3;
+      const influenceY = Math.cos(lyricLength * 0.3) * windowSize.height * 0.3;
+      
+      lyricsInfluenceRef.current = {
+        x: influenceX,
+        y: influenceY,
+        strength: Math.min(1, lyricLength / 30) * 0.6
+      };
     } else {
-      // Shift back towards purple for verses
-      backgroundHueRef.current = 280
-      glowIntensityRef.current.target = 0.5
+      lyricsInfluenceRef.current = { x: 0, y: 0, strength: 0 };
     }
-  }, [isChorus])
+  }, [isChorus, currentLyric, windowSize]);
 
-  // Update star field opacity based on playing state
+  // Initialize canvas and start animation
   useEffect(() => {
-    // Brighter stars when playing
-    starFieldOpacityRef.current = isPlaying ? 1 : 0.7
-  }, [isPlaying])
+    if (!canvasRef.current) return;
 
-  // Main animation loop
-  useEffect(() => {
-    if (!canvasRef.current || !canvasContextRef.current) return
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    contextRef.current = ctx;
 
-    const ctx = canvasContextRef.current
+    // Set canvas size
+    const setupCanvas = () => {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = windowSize.width * dpr;
+      canvas.height = windowSize.height * dpr;
+      canvas.style.width = `${windowSize.width}px`;
+      canvas.style.height = `${windowSize.height}px`;
+      
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
+    };
 
-    // Animate function
+    // Initialize stars
+    const setupStars = () => {
+      const starDensity = isMobile ? 0.00008 : 0.00012;
+      const maxStars = isMobile ? 80 : 150;
+      
+      const calculatedCount = Math.floor(windowSize.width * windowSize.height * starDensity);
+      const starCount = Math.min(calculatedCount, maxStars);
+
+      starsRef.current = Array.from({ length: starCount }, () => ({
+        x: Math.random() * windowSize.width,
+        y: Math.random() * windowSize.height,
+        size: Math.random() * 1.5 + 0.5,
+        speed: Math.random() * 0.03 + 0.01,
+        brightness: Math.random() * 0.7 + 0.3,
+        pulseDelta: Math.random() * 0.005 + 0.002,
+        hue: Math.random() * 60 + hueRef.current,
+        opacity: Math.random() * 0.5 + 0.5,
+        twinkle: Math.random() > 0.6
+      }));
+    };
+
+    // Initialize floating particles
+    const setupParticles = () => {
+      const particleDensity = isMobile ? 0.000015 : 0.00003;
+      const maxParticles = isMobile ? 12 : 25;
+      
+      const calculatedCount = Math.floor(windowSize.width * windowSize.height * particleDensity);
+      const particleCount = Math.min(calculatedCount, maxParticles);
+
+      particlesRef.current = Array.from({ length: particleCount }, () => ({
+        x: Math.random() * windowSize.width,
+        y: Math.random() * windowSize.height,
+        size: Math.random() * 3 + 1,
+        speed: Math.random() * 0.2 + 0.1,
+        dirX: Math.random() * 2 - 1,
+        dirY: Math.random() * 2 - 1,
+        hue: Math.random() * 60 + hueRef.current,
+        opacity: Math.random() * 0.3 + 0.1,
+        decay: Math.random() * 0.008 + 0.003
+      }));
+    };
+
+    // Setup all elements
+    const setupAll = () => {
+      setupCanvas();
+      setupStars();
+      setupParticles();
+    };
+    
+    setupAll();
+    window.addEventListener("resize", setupAll);
+
+    // Animation loop
     const animate = (timestamp) => {
-      if (!isMountedRef.current || !canvasRef.current) {
+      if (!isMountedRef.current || !canvas || !ctx) {
         if (requestRef.current) {
-          cancelAnimationFrame(requestRef.current)
-          requestRef.current = null
+          cancelAnimationFrame(requestRef.current);
         }
-        return
+        return;
       }
 
-      // Limit frame rate for performance
-      if (timestamp - lastRenderTimeRef.current < 33) {
-        // ~30fps
-        requestRef.current = requestAnimationFrame(animate)
-        return
+      // Limit framerate for performance
+      if (timestamp - lastRenderTimeRef.current < 33) { // ~30fps
+        requestRef.current = requestAnimationFrame(animate);
+        return;
       }
+      lastRenderTimeRef.current = timestamp;
 
-      lastRenderTimeRef.current = timestamp
+      // Clear with trail effect
+      ctx.fillStyle = "rgba(10, 10, 20, 0.2)";
+      ctx.fillRect(0, 0, windowSize.width, windowSize.height);
 
-      // Clear canvas with slight transparency for trailing effect
-      ctx.fillStyle = "rgba(10, 10, 20, 0.2)"
-      ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-
-      // Update pulse effect
-      pulseEffectRef.current = isPlaying
-        ? (pulseEffectRef.current + 0.01) % (Math.PI * 2)
-        : (pulseEffectRef.current + 0.005) % (Math.PI * 2)
-
-      const pulseValue = Math.sin(pulseEffectRef.current) * 0.5 + 0.5 // 0 to 1
-
-      // Smooth glow intensity transition
-      glowIntensityRef.current.current += (glowIntensityRef.current.target - glowIntensityRef.current.current) * 0.05
-
-      // Get audio reactivity value
+      // Get audio reactivity
       const getAudioReactivity = () => {
-        if (!audioLevel || audioLevel.length === 0) return 1
+        if (!audioLevel || audioLevel.length === 0) return 1;
 
-        // Calculate average level, prioritize lower frequencies (bass)
-        let bassSum = 0
-        let bassCount = 0
-        let midSum = 0
-        let midCount = 0
-
-        const bassRange = Math.min(audioLevel.length, 20)
-        const midRange = Math.min(audioLevel.length, 50)
+        // Focus on bass frequencies
+        const bassRange = Math.min(audioLevel.length, 20);
+        let bassSum = 0;
 
         for (let i = 0; i < bassRange; i++) {
-          bassSum += audioLevel[i]
-          bassCount++
+          bassSum += audioLevel[i];
         }
 
-        for (let i = bassRange; i < midRange; i++) {
-          midSum += audioLevel[i]
-          midCount++
-        }
+        const bassAvg = bassSum / bassRange / 255;
+        return 1 + (bassAvg * 1.5); // Scale effect
+      };
 
-        const bassAvg = bassSum / (bassCount || 1) / 255
-        const midAvg = midSum / (midCount || 1) / 255
+      const audioReactivity = getAudioReactivity();
+      
+      // Smooth intensity transition
+      intensityRef.current.current += 
+        (intensityRef.current.target - intensityRef.current.current) * 0.05;
 
-        // Weight bass more heavily
-        return 1 + (bassAvg * 1.5 + midAvg * 0.5) // Scale up for more dramatic effect
-      }
+      // Render stars
+      const maxStarsToRender = isMobile ? 70 : 120;
+      const starsToRender = Math.min(starsRef.current.length, maxStarsToRender);
 
-      const audioReactivity = getAudioReactivity()
-
-      // Draw stars with better performance handling
-      const maxStarsToRender = mobileMode ? 300 : 800 // Increased star count
-      const starsToRender = Math.min(starsRef.current.length, maxStarsToRender)
-
+      ctx.save();
+      
       for (let i = 0; i < starsToRender; i++) {
-        const star = starsRef.current[i]
+        const star = starsRef.current[i];
 
-        // Update brightness for twinkling effect
-        star.brightness += star.pulseDelta
-
-        // Reverse direction at boundaries
+        // Twinkle effect
+        star.brightness += star.pulseDelta;
         if (star.brightness > 1 || star.brightness < 0.3) {
-          star.pulseDelta = -star.pulseDelta
+          star.pulseDelta = -star.pulseDelta;
         }
 
-        // Bonus twinkle effect for some stars
-        let twinkleFactor = 1
-        if (star.twinkle) {
-          twinkleFactor = 0.7 + Math.sin(timestamp * star.twinkleSpeed) * 0.3
-        }
+        let twinkleFactor = star.twinkle ? 
+          0.7 + Math.sin(timestamp * 0.001 * (Math.random() * 0.5 + 0.5)) * 0.3 : 1;
 
         // Audio influence
-        let audioInfluence = 0
-        if (isPlaying && audioLevel.length > 0) {
-          // Get audio data sample based on star's x position
-          const audioIndex = Math.floor((star.x / canvasRef.current.width) * audioLevel.length)
-          const audioValue = audioLevel[audioIndex] || 0
-
-          // Normalize from 0-255 to 0-0.3 (increased effect)
-          audioInfluence = (audioValue / 255) * 0.4
+        let audioEffect = 0;
+        if (isPlaying && audioLevel.length > 0 && i % 5 === 0) { // Process just some stars
+          const index = Math.floor((i / starsToRender) * audioLevel.length);
+          audioEffect = (audioLevel[index] || 0) / 255 * 0.3;
         }
 
-        // Mouse influence (subtle)
-        let mouseInfluence = 0
-        if (isMoving) {
-          const dx = mousePosition.x - star.x
-          const dy = mousePosition.y - star.y
-          const distance = Math.sqrt(dx * dx + dy * dy)
-          const mouseRange = 150
-
-          if (distance < mouseRange) {
-            // Enhanced effect
-            mouseInfluence = (1 - distance / mouseRange) * 0.1
+        // Lyrics/Chorus influence (replacing mouse influence)
+        let lyricsEffect = 0;
+        if (lyricsInfluenceRef.current.strength > 0) {
+          // Distance from influence center
+          const dx = (windowSize.width/2 + lyricsInfluenceRef.current.x) - star.x;
+          const dy = (windowSize.height/2 + lyricsInfluenceRef.current.y) - star.y;
+          const distSq = dx*dx + dy*dy;
+          const maxDistSq = (windowSize.width * 0.6) ** 2;
+          
+          if (distSq < maxDistSq) {
+            lyricsEffect = lyricsInfluenceRef.current.strength * (1 - distSq / maxDistSq);
           }
         }
 
-        // Combine all factors
-        const finalBrightness = star.brightness * twinkleFactor + audioInfluence + mouseInfluence
-        const finalSize = star.size * (1 + audioInfluence * 1.5) // Enhanced size change
-
-        // Apply star field opacity
-        const starOpacity = finalBrightness * star.opacity * starFieldOpacityRef.current
+        // Combined effects
+        const finalBrightness = star.brightness * twinkleFactor + audioEffect + lyricsEffect;
+        const finalSize = star.size * (1 + audioEffect * 0.7 + lyricsEffect * 0.3);
+        const opacity = finalBrightness * (isPlaying ? 1 : 0.7);
 
         // Draw star
-        ctx.fillStyle = `hsla(${star.hue}, 80%, 75%, ${starOpacity})` // Increased saturation
-        ctx.beginPath()
-        ctx.arc(star.x, star.y, finalSize, 0, Math.PI * 2)
-        ctx.fill()
+        ctx.fillStyle = `hsla(${star.hue}, 90%, 80%, ${opacity})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, finalSize, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Add glow effect for brighter stars
+        // Glow effect for bright stars
         if (finalBrightness > 0.7) {
-          ctx.shadowBlur = finalSize * 3 // Enhanced glow
-          ctx.shadowColor = `hsla(${star.hue}, 80%, 75%, 0.6)` // Brighter glow
+          ctx.shadowBlur = finalSize * 3;
+          ctx.shadowColor = `hsla(${star.hue}, 90%, 80%, 0.7)`;
         } else {
-          ctx.shadowBlur = 0
+          ctx.shadowBlur = 0;
         }
 
-        // Update position - stars move down slowly
-        star.y += star.speed * (isPlaying ? 2 : 0.5) * audioReactivity // Faster movement when playing
-
-        // Wrap around if out of screen
-        if (star.y > canvasRef.current.height) {
-          star.y = 0
-          star.x = Math.random() * canvasRef.current.width
-
-          // Update the hue to match current background
-          star.hue = Math.random() * 60 + backgroundHueRef.current
+        // Move star with added chorus & lyrics influence 
+        const baseSpeed = star.speed * (isPlaying ? audioReactivity : 0.5);
+        
+        // Add some direction influence based on chorus/lyrics
+        let xInfluence = 0;
+        let yInfluence = baseSpeed;
+        
+        if (isChorus) {
+          // During chorus, add some horizontal sway
+          xInfluence = Math.sin(timestamp * 0.001 + star.y * 0.01) * 0.3;
         }
+        
+        if (lyricsInfluenceRef.current.strength > 0) {
+          // Add subtle pull toward lyrics influence point
+          const centerX = windowSize.width/2 + lyricsInfluenceRef.current.x;
+          const centerY = windowSize.height/2 + lyricsInfluenceRef.current.y;
+          
+          const dx = centerX - star.x;
+          const dy = centerY - star.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          
+          if (dist > 0) {
+            xInfluence += (dx / dist) * 0.1 * lyricsInfluenceRef.current.strength;
+            yInfluence += (dy / dist) * 0.1 * lyricsInfluenceRef.current.strength;
+          }
+        }
+        
+        star.x += xInfluence;
+        star.y += yInfluence;
+        
+        // Wrap around screen
+        if (star.y > windowSize.height) {
+          star.y = 0;
+          star.x = Math.random() * windowSize.width;
+          star.hue = Math.random() * 60 + hueRef.current;
+        }
+        
+        // Keep stars within horizontal bounds
+        if (star.x < 0) star.x = windowSize.width;
+        if (star.x > windowSize.width) star.x = 0;
       }
+      
+      ctx.restore();
 
-      // Draw particles - increased for visual impact
-      const maxParticlesToRender = mobileMode ? 30 : 60 // More particles
-      const particlesToRender = Math.min(particlesRef.current.length, maxParticlesToRender)
+      // Render particles with chorus influence
+      const maxParticlesToRender = isMobile ? 10 : 20;
+      const particlesToRender = Math.min(particlesRef.current.length, maxParticlesToRender);
 
+      ctx.save();
+      
       for (let i = 0; i < particlesToRender; i++) {
-        const particle = particlesRef.current[i]
+        const p = particlesRef.current[i];
 
-        // Audio reactivity for particles
-        let audioReactivityFactor = 1
-        if (isPlaying && audioLevel.length > 0) {
-          const audioIndex = Math.floor((i / particlesToRender) * audioLevel.length)
-          const audioValue = audioLevel[audioIndex] || 0
-          audioReactivityFactor = 1 + audioValue / 128 // Enhanced reactivity
+        // Audio reactivity
+        let audioFactor = 1;
+        if (isPlaying && audioLevel.length > 0 && i % 2 === 0) {
+          const index = Math.floor((i / particlesToRender) * audioLevel.length);
+          audioFactor = 1 + (audioLevel[index] || 0) / 255;
+        }
+
+        // Chorus influence on particles
+        if (isChorus) {
+          // More dynamic movement during chorus
+          p.dirX += (Math.random() - 0.5) * 0.05;
+          p.dirY += (Math.random() - 0.5) * 0.05;
+          
+          // Normalize direction vector to prevent extreme speeds
+          const mag = Math.sqrt(p.dirX * p.dirX + p.dirY * p.dirY);
+          if (mag > 0) {
+            p.dirX = p.dirX / mag;
+            p.dirY = p.dirY / mag;
+          }
+        }
+
+        // Lyrics influence on particles
+        if (lyricsInfluenceRef.current.strength > 0) {
+          const centerX = windowSize.width/2 + lyricsInfluenceRef.current.x;
+          const centerY = windowSize.height/2 + lyricsInfluenceRef.current.y;
+          
+          const dx = centerX - p.x;
+          const dy = centerY - p.y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          
+          if (dist > 0) {
+            p.dirX += (dx / dist) * 0.01 * lyricsInfluenceRef.current.strength;
+            p.dirY += (dy / dist) * 0.01 * lyricsInfluenceRef.current.strength;
+          }
         }
 
         // Update position
-        particle.x += particle.directionX * particle.speed * audioReactivityFactor
-        particle.y += particle.directionY * particle.speed * audioReactivityFactor
+        p.x += p.dirX * p.speed * audioFactor;
+        p.y += p.dirY * p.speed * audioFactor;
 
         // Bounce off edges
-        if (particle.x < 0 || particle.x > canvasRef.current.width) {
-          particle.directionX *= -1
-        }
-
-        if (particle.y < 0 || particle.y > canvasRef.current.height) {
-          particle.directionY *= -1
-        }
+        if (p.x < 0 || p.x > windowSize.width) p.dirX *= -1;
+        if (p.y < 0 || p.y > windowSize.height) p.dirY *= -1;
 
         // Draw particle
-        ctx.beginPath()
-        const gradient = ctx.createRadialGradient(particle.x, particle.y, 0, particle.x, particle.y, particle.size * 2)
-        gradient.addColorStop(0, `hsla(${particle.hue}, 80%, 75%, ${particle.opacity}`) // Brighter center
-        gradient.addColorStop(1, `hsla(${particle.hue}, 80%, 50%, 0)`)
+        if (isMobile) {
+          // Simple circle for mobile
+          ctx.fillStyle = `hsla(${p.hue}, 80%, 75%, ${p.opacity})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Gradient for desktop
+          const grad = ctx.createRadialGradient(
+            p.x, p.y, 0, p.x, p.y, p.size * 1.5
+          );
+          grad.addColorStop(0, `hsla(${p.hue}, 80%, 75%, ${p.opacity})`);
+          grad.addColorStop(1, `hsla(${p.hue}, 80%, 50%, 0)`);
+          
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
-        ctx.fillStyle = gradient
-        ctx.arc(particle.x, particle.y, particle.size * 2, 0, Math.PI * 2)
-        ctx.fill()
-
-        // Slowly fade out particles
-        particle.opacity -= particle.decay
-
-        // Reset particles that have faded out
-        if (particle.opacity <= 0) {
-          particle.x = Math.random() * canvasRef.current.width
-          particle.y = Math.random() * canvasRef.current.height
-          particle.opacity = Math.random() * 0.3 + 0.1 // Brighter when reset
-
-          // Update the hue to match current background
-          particle.hue = Math.random() * 60 + backgroundHueRef.current
+        // Fade out and reset
+        p.opacity -= p.decay;
+        if (p.opacity <= 0) {
+          p.x = Math.random() * windowSize.width;
+          p.y = Math.random() * windowSize.height;
+          p.opacity = Math.random() * 0.3 + 0.1;
+          p.hue = Math.random() * 60 + hueRef.current;
         }
       }
+      
+      ctx.restore();
 
-      // Draw aurora borealis effect during chorus
-      if (isChorus) {
-        drawAuroraBorealis(ctx, timestamp, audioReactivity)
-      }
+      // Draw aurora effect during chorus
+      if (isChorus && isPlaying && !isMobile) {
+        // Bottom wave effect
+        const waveCount = 3;
+        const baseY = windowSize.height * 0.65;
 
-      requestRef.current = requestAnimationFrame(animate)
-    }
+        for (let w = 0; w < waveCount; w++) {
+          const hue = hueRef.current - 40 + w * 20;
+          
+          ctx.beginPath();
+          ctx.moveTo(0, baseY + Math.sin(timestamp * 0.0005 + w) * 50);
 
-    // Draw aurora borealis effect
-    const drawAuroraBorealis = (ctx, timestamp, audioReactivity) => {
-      if (!canvasRef.current || !isMountedRef.current) return
+          const pointCount = 10;
+          for (let i = 0; i <= pointCount; i++) {
+            const x = (windowSize.width / pointCount) * i;
+            const wave1 = Math.sin(timestamp * 0.0005 + i * 0.2 + w) * 50;
+            const wave2 = Math.sin(timestamp * 0.0008 + i * 0.3) * 30;
 
-      const width = canvasRef.current.width
-      const height = canvasRef.current.height
-
-      // Create multiple wave-like shapes
-      const waveCount = 3
-      const baseY = height * 0.6
-
-      for (let w = 0; w < waveCount; w++) {
-        // Different hues for each wave
-        const hue = backgroundHueRef.current - 50 + w * 30
-
-        ctx.beginPath()
-
-        // Start from left edge
-        ctx.moveTo(0, baseY + Math.sin(timestamp * 0.001 + w) * 50)
-
-        // Create wave points
-        const pointCount = 10
-        for (let i = 0; i <= pointCount; i++) {
-          const x = (width / pointCount) * i
-
-          // Calculate wave height with multiple sine waves
-          const timeOffset = timestamp * 0.001
-          const wave1 = Math.sin(timeOffset + i * 0.2 + w) * 50
-          const wave2 = Math.sin(timeOffset * 1.5 + i * 0.3) * 30
-          const wave3 = Math.sin(timeOffset * 0.7 - i * 0.4 + w * 0.5) * 20
-
-          // Combine waves and apply audio reactivity
-          const y = baseY + (wave1 + wave2 + wave3) * audioReactivity * 1.5 // Enhanced effect
-
-          // Use quadratic curves for smoother lines
-          if (i === 0) {
-            ctx.moveTo(x, y)
-          } else {
-            const prevX = (width / pointCount) * (i - 1)
-            const cpX = (x + prevX) / 2
-            ctx.quadraticCurveTo(cpX, y, x, y)
+            const y = baseY + (wave1 + wave2) * audioReactivity * 0.7;
+            
+            if (i === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
           }
+
+          ctx.lineTo(windowSize.width, windowSize.height);
+          ctx.lineTo(0, windowSize.height);
+          ctx.closePath();
+
+          const gradient = ctx.createLinearGradient(0, baseY - 100, 0, baseY + 100);
+          gradient.addColorStop(0, `hsla(${hue}, 90%, 75%, 0)`);
+          gradient.addColorStop(0.5, `hsla(${hue}, 90%, 75%, ${0.15 * audioReactivity * intensityRef.current.current})`);
+          gradient.addColorStop(1, `hsla(${hue}, 90%, 60%, 0)`);
+
+          ctx.fillStyle = gradient;
+          ctx.fill();
         }
-
-        // Complete the shape by going to bottom and back to start
-        ctx.lineTo(width, height)
-        ctx.lineTo(0, height)
-        ctx.closePath()
-
-        // Create gradient fill with enhanced opacity
-        const gradient = ctx.createLinearGradient(0, baseY - 100, 0, baseY + 100)
-        gradient.addColorStop(0, `hsla(${hue}, 80%, 70%, 0)`)
-        gradient.addColorStop(
-          0.5,
-          `hsla(${hue}, 80%, 70%, ${0.15 * audioReactivity * glowIntensityRef.current.current})`,
-        )
-        gradient.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`)
-
-        ctx.fillStyle = gradient
-        ctx.fill()
       }
-    }
 
-    // Start animation
-    requestRef.current = requestAnimationFrame(animate)
+      requestRef.current = requestAnimationFrame(animate);
+    };
+
+    requestRef.current = requestAnimationFrame(animate);
 
     return () => {
-      isMountedRef.current = false
       if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current)
-        requestRef.current = null
+        cancelAnimationFrame(requestRef.current);
       }
-    }
-  }, [isPlaying, mousePosition, isMoving, isChorus, audioLevel, mobileMode])
+      window.removeEventListener("resize", setupAll);
+    };
+  }, [isPlaying, isChorus, audioLevel, isMobile, windowSize, currentLyric]);
 
   return (
     <>
-      {/* Base gradient background - enhanced colors */}
-      <div className="fixed inset-0 bg-gradient-to-b from-[#0f0a20] via-[#120824] to-[#0a0a18] z-[-10]"></div>
+      {/* Base gradient background */}
+      <div className="fixed inset-0 bg-gradient-to-b from-[#0f0a20] via-[#120824] to-[#0a0a18] z-[-10]" />
 
-      {/* Canvas for star field and particles */}
-      <canvas ref={canvasRef} className="fixed inset-0 z-[-9]" style={{ filter: "blur(0.5px)" }} />
+      {/* Canvas for stars and particles */}
+      <canvas 
+        ref={canvasRef} 
+        className="fixed inset-0 z-[-9]" 
+        style={{ 
+          filter: "blur(0.5px)",
+          willChange: "transform",
+          transform: "translateZ(0)"
+        }} 
+      />
 
-      {/* Subtle noise texture overlay */}
-      <div className="fixed inset-0 z-[-8] opacity-[0.03] pointer-events-none bg-noise"></div>
+      {/* Subtle noise texture */}
+      <div className="fixed inset-0 z-[-8] opacity-[0.03] pointer-events-none bg-noise" />
 
-      {/* Subtle vignette effect */}
-      <div className="fixed inset-0 z-[-7] pointer-events-none shadow-vignette"></div>
+      {/* Vignette effect */}
+      <div className="fixed inset-0 z-[-7] pointer-events-none shadow-vignette" />
 
-      {/* Audio reactive glow - central - enhanced */}
-      <div
+      {/* Reactive center glow */}
+      <motion.div
         className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-96 z-[-6] pointer-events-none"
+        animate={{
+          opacity: isPlaying ? (isChorus ? 0.6 : 0.3) : 0.05,
+        }}
+        transition={{ duration: 0.5 }}
         style={{
-          opacity: isPlaying ? (isChorus ? 0.5 : 0.3) : 0.05,
-          background: `radial-gradient(circle, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.3) 0%, rgba(${isChorus ? "123,58,237" : "227,74,123"},0.15) 50%, rgba(0,0,0,0) 70%)`,
-          filter: "blur(30px)",
+          background: `radial-gradient(circle, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.4) 0%, rgba(${isChorus ? "123,58,237" : "227,74,123"},0.2) 50%, rgba(0,0,0,0) 70%)`,
+          filter: "blur(30px)"
         }}
       />
 
-      {/* Horizontal accent lines - enhanced */}
-      <div className="fixed inset-0 z-[-5] pointer-events-none" style={{ opacity: isPlaying ? 1 : 0 }}>
-        <div
-          className="absolute top-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary-500/20 to-transparent"
-          style={{
-            transform: isPlaying ? `translateY(${Math.sin(Date.now() * 0.001) * 5}px)` : "none",
-            opacity: isPlaying ? 0.7 + Math.sin(Date.now() * 0.0005) * 0.3 : 0.7,
-          }}
-        />
+      {/* Horizontal accent lines */}
+      {isPlaying && (
+        <div className="fixed inset-0 z-[-5] pointer-events-none">
+          <motion.div
+            className="absolute top-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary-500/20 to-transparent"
+            animate={{
+              y: [-5, 5, -5],
+              opacity: [0.5, 0.8, 0.5]
+            }}
+            transition={{
+              duration: 8,
+              repeat: Infinity,
+              repeatType: "loop"
+            }}
+          />
 
-        <div
-          className="absolute bottom-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-secondary-500/20 to-transparent"
-          style={{
-            transform: isPlaying ? `translateY(${Math.sin(Date.now() * 0.0008 + 1) * -5}px)` : "none",
-            opacity: isPlaying ? 0.7 + Math.sin(Date.now() * 0.0004 + 2) * 0.3 : 0.7,
-          }}
-        />
-      </div>
-
-      {/* Dynamic chorus-specific effect - enhanced */}
-      {isChorus && (
-        <div className="fixed inset-0 z-[-4] pointer-events-none" style={{ opacity: 1 }}>
-          <div
-            className="absolute inset-0 bg-gradient-radial from-primary-500/10 via-secondary-500/5 to-transparent"
-            style={{
-              transform: `scale(${1 + Math.sin(Date.now() * 0.0005) * 0.05})`,
-              opacity: 0.7 + Math.sin(Date.now() * 0.0003) * 0.15,
+          <motion.div
+            className="absolute bottom-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-secondary-500/20 to-transparent"
+            animate={{
+              y: [5, -5, 5],
+              opacity: [0.5, 0.8, 0.5]
+            }}
+            transition={{
+              duration: 8,
+              repeat: Infinity,
+              repeatType: "loop",
+              delay: 2
             }}
           />
         </div>
       )}
 
-      {/* Audio reactive bottom gradient - enhanced */}
-      <div
+      {/* Chorus-specific effect */}
+      {isChorus && (
+        <motion.div
+          className="fixed inset-0 z-[-4] pointer-events-none"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <motion.div
+            className="absolute inset-0 bg-gradient-radial from-primary-500/10 via-secondary-500/5 to-transparent"
+            animate={{
+              scale: [1, 1.05, 1],
+              opacity: [0.5, 0.7, 0.5]
+            }}
+            transition={{
+              duration: 4,
+              repeat: Infinity,
+              repeatType: "mirror"
+            }}
+          />
+        </motion.div>
+      )}
+
+      {/* Bottom gradient */}
+      <motion.div
         className="fixed bottom-0 left-0 right-0 z-[-3] pointer-events-none"
+        animate={{
+          opacity: isPlaying ? (isChorus ? 0.3 : 0.2) : 0.1,
+          height: isPlaying ? [80, 100, 80] : 60
+        }}
+        transition={{
+          opacity: { duration: 0.5 },
+          height: { duration: 5, repeat: Infinity, repeatType: "mirror" }
+        }}
         style={{
-          opacity: isPlaying ? 0.3 : 0.1,
-          height: isPlaying ? 100 + Math.sin(Date.now() * 0.0004) * 10 : 80,
-          background: `linear-gradient(to top, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.15) 0%, transparent 100%)`,
+          background: `linear-gradient(to top, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.15) 0%, transparent 100%)`
         }}
       />
     </>
-  )
-}
+  );
+};
 
-export default Background
+export default Background;

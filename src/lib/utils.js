@@ -1,11 +1,45 @@
-import { clsx } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
-// Debounce function - membatasi seberapa sering fungsi dipanggil
+// Format time for audio player
+export function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return "0:00";
+  
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
+// Generate random number between min and max
+export function random(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Create ripple effect for buttons
+export function createRipple(event) {
+  const button = event.currentTarget;
+  const rect = button.getBoundingClientRect();
+
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+
+  const ripple = document.createElement("span");
+  ripple.classList.add("ripple");
+  ripple.style.left = `${x}px`;
+  ripple.style.top = `${y}px`;
+
+  button.appendChild(ripple);
+
+  setTimeout(() => {
+    ripple.remove();
+  }, 1000);
+}
+
+// Debounce function - throttle function calls
 export function debounce(func, wait) {
   let timeout;
   return function executedFunction(...args) {
@@ -18,41 +52,7 @@ export function debounce(func, wait) {
   };
 }
 
-// Format time for audio player
-export function formatTime(seconds) {
-  if (!seconds || isNaN(seconds)) return "0:00";
-  
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = Math.floor(seconds % 60)
-  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`
-}
-
-// Generate random number between min and max
-export function random(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min
-}
-
-// Create ripple effect
-export function createRipple(event) {
-  const button = event.currentTarget
-  const rect = button.getBoundingClientRect()
-
-  const x = event.clientX - rect.left
-  const y = event.clientY - rect.top
-
-  const ripple = document.createElement("span")
-  ripple.classList.add("ripple")
-  ripple.style.left = `${x}px`
-  ripple.style.top = `${y}px`
-
-  button.appendChild(ripple)
-
-  setTimeout(() => {
-    ripple.remove()
-  }, 1000)
-}
-
-// Parse SRT timestamp format (00:00:00,000) to seconds
+// Updated SRT timestamp conversion that is more precise
 export function srtTimestampToSeconds(timestamp) {
   // Format: 00:00:00,000 or 00:00:00.000
   const normalizedTimestamp = timestamp.replace(',', '.');
@@ -67,7 +67,7 @@ export function srtTimestampToSeconds(timestamp) {
   );
 }
 
-// Process SRT content from the subtitle file
+// Optimized SRT parser based on provided SRT file
 export function parseSRT(srtContent) {
   const subtitles = [];
   const blocks = srtContent.trim().split(/\r?\n\r?\n/);
@@ -99,36 +99,11 @@ export function parseSRT(srtContent) {
   return subtitles;
 }
 
-// Find active lyric based on current time
-export function findActiveLyric(currentTime) {
-  const currentIndex = lyrics.findIndex((lyric, index) => {
-    const nextLyric = lyrics[index + 1]
-    if (nextLyric) {
-      return currentTime >= lyric.time && currentTime < nextLyric.time
-    }
-    return currentTime >= lyric.time
-  })
-
-  if (currentIndex !== -1) {
-    return {
-      index: currentIndex,
-      text: lyrics[currentIndex].text
-    }
-  }
-  
-  return null
-}
-
-// Check if lyrics is a chorus line
-export function isChorusLine(text) {
-  return chorusLines.some(line => 
-    text.includes(line) || line.includes(text)
-  );
-}
-
-// Updated lyrics with SRT timings
+// Optimized lyrics data based on the provided SRT file
 export const lyrics = [
   { time: 0.00, text: "..." },
+  { time: 3.295, text: "UHH UHH" },
+  { time: 6.381, text: "..." },
   { time: 8.634, text: "I, I JUST WOKE UP FROM A DREAM" },
   { time: 15.557, text: "WHERE YOU AND I HAD TO SAY GOODBYE" },
   { time: 20.270, text: "AND I DON'T KNOW WHAT IT ALL MEANS" },
@@ -142,8 +117,8 @@ export const lyrics = [
   { time: 62.771, text: "I'D WANNA HOLD YOU JUST FOR A WHILE" },
   { time: 67.442, text: "AND DIE WITH A SMILE" },
   { time: 71.989, text: "IF THE WORLD WAS ENDING I'D WANNA BE NEXT TO YOU" },
-  { time: 78.000, text: "..." },
-  { time: 87.000, text: "OOH LOST" },
+  { time: 81.039, text: "WOO OOH" },
+  { time: 85.085, text: "OOH LOST" },
   { time: 88.588, text: "LOST IN THE WORDS THAT WE SCREAM" },
   { time: 92.843, text: "I DON'T EVEN WANNA DO THIS ANYMORE" },
   { time: 97.639, text: "CUZ YOU ALREADY KNOW WHAT YOU MEAN TO ME" },
@@ -171,7 +146,7 @@ export const lyrics = [
   { time: 217.968, text: "IF THE WORLD WAS ENDING I'D WANNA BE NEXT TO YOU" },
   { time: 226.685, text: "IF THE WORLD WAS ENDING I'D WANNA BE NEXT TO YOU" },
   { time: 233.442, text: "..." },
-  { time: 236.000, text: "[VOCALIZING]" },
+  { time: 235.944, text: "[VOCALIZING]" },
   { time: 239.239, text: "I'D WANNA BE NEXT TO YOU" },
   { time: 242.909, text: "..." }
 ];
@@ -185,10 +160,12 @@ export const chorusLines = [
   "WAS THROUGH",
   "I'D WANNA HOLD YOU",
   "JUST FOR A WHILE",
-  "AND DIE WITH A SMILE"
+  "AND DIE WITH A SMILE",
+  "RIGHT NEXT TO YOU",
+  "NEXT TO YOU"
 ];
 
-// Complete SRT data for processing
+// Updated SRT data based on exact timing
 export const srtData = `1
 00:00:00,626 --> 00:00:03,212
 ♪♪♪
@@ -356,47 +333,78 @@ I'D WANNA BE NEXT TO YOU ♪
 00:03:59,239 --> 00:04:02,909
 ♪ I'D WANNA BE NEXT TO YOU ♪`;
 
-// Get current active subtitle
+// Get current active lyric - more accurate
 export function getCurrentLyric(currentTime) {
-  const parsedSubtitles = parseSRT(srtData);
-  return parsedSubtitles.find(subtitle => 
-    currentTime >= subtitle.start && currentTime <= subtitle.end
+  // Binary search for better performance with sorted data
+  let start = 0;
+  let end = lyrics.length - 1;
+  let result = -1;
+
+  while (start <= end) {
+    const mid = Math.floor((start + end) / 2);
+    if (lyrics[mid].time <= currentTime) {
+      result = mid;
+      start = mid + 1;
+    } else {
+      end = mid - 1;
+    }
+  }
+
+  if (result !== -1) {
+    // Check if next lyric is closer
+    const nextIndex = result + 1;
+    if (nextIndex < lyrics.length && 
+        lyrics[nextIndex].time - currentTime < 0.1) { // Tolerance of 100ms
+      return { index: nextIndex, text: lyrics[nextIndex].text };
+    }
+    return { index: result, text: lyrics[result].text };
+  }
+
+  return null;
+}
+
+// Check if lyric is a chorus line - optimized
+export function isChorusLine(text) {
+  if (!text) return false;
+  
+  return chorusLines.some(line => 
+    text.includes(line) || line.includes(text)
   );
 }
 
-// Simulate the conditions from the user's code
-export function worldIsEnding() {
-  return true
+// Find active lyric word at specific time point for word-by-word animation
+export function getActiveWord(currentTime, lineStartTime, lineDuration, wordCount) {
+  if (!currentTime || !lineStartTime || !lineDuration || !wordCount) return -1;
+  
+  const elapsedTime = currentTime - lineStartTime;
+  if (elapsedTime < 0) return -1;
+  
+  const timePerWord = lineDuration / wordCount;
+  const currentWordIndex = Math.min(Math.floor(elapsedTime / timePerWord), wordCount - 1);
+  
+  return Math.max(0, currentWordIndex);
 }
 
-export function partyIsOver() {
-  return true
-}
-
-export function timeOnEarthIsThrough() {
-  return true
-}
-
-// Function for chorus logic
-export function dieWithASmileLogic() {
-  if (worldIsEnding()) {
-    return "i wanna be next.js"
-  } else if (partyIsOver() && timeOnEarthIsThrough()) {
-    return "i wanna hold you just for a while and die with a smile"
-  } else {
-    return "i'd still choose you, even in the bugs of life"
+// Get lyrics with precise timing info for word-by-word highlighting
+export function getLyricTimingInfo(currentIndex) {
+  if (currentIndex < 0 || currentIndex >= lyrics.length) return null;
+  
+  const currentLyric = lyrics[currentIndex];
+  const nextLyric = lyrics[currentIndex + 1];
+  
+  // Calculate duration between this lyric and the next
+  let duration = 2; // default if no next lyric
+  if (nextLyric) {
+    duration = nextLyric.time - currentLyric.time;
   }
+  
+  const words = currentLyric.text.split(' ').filter(w => w.trim().length > 0);
+  
+  return {
+    startTime: currentLyric.time,
+    duration: duration,
+    wordCount: words.length,
+    words: words,
+    isChorus: isChorusLine(currentLyric.text)
+  };
 }
-
-// Quotes about love and time for the background elements
-export const quotes = [
-  "In the end, we're all just stardust and stories",
-  "Time is precious, but our connection is timeless",
-  "Even in our final moments, love remains",
-  "The universe may end, but what we feel is eternal",
-  "When everything fades, I'll still be holding your hand",
-  "Our love defies the constraints of time",
-  "In the face of oblivion, we found each other",
-  "Some infinities are bigger than other infinities",
-  "The stars may die, but our light travels forever",
-];
