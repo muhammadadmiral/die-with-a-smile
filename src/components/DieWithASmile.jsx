@@ -1,218 +1,322 @@
-"use client"
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { motion } from "framer-motion";
+import ErrorBoundary from "./ErrorBoundary";
+import Background from "./Background";
+import AudioPlayer from "./AudioPlayer";
+import CodeVisualizer from "./CodeVisualizer";
+import LyricsVisualizer from "./LyricsVisualizer";
 
-import React, { useState, useRef, useEffect, useCallback, Suspense, memo } from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { lyrics, chorusLines } from "../lib/utils"
-
-// Import komponen-komponen terpisah
-import ErrorBoundary from "./ErrorBoundary"
-import Background from "./Background"
-import AudioPlayer from "./AudioPlayer"
-import LyricsVisualizer from "./LyricsVisualizer"
-import CodeVisualizer from "./CodeVisualizer"
-
-// Bungkus Background dengan memo agar tidak re-render bila props tidak berubah
-const MemoizedBackground = memo(Background)
+// Component to show during lazy loading
+const LoadingFallback = () => (
+  <div className="fixed inset-0 flex items-center justify-center bg-dark-950/90 z-50">
+    <div className="text-center">
+      <div className="flex items-center justify-center mb-4">
+        <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce mr-1" style={{ animationDelay: "0ms" }}></div>
+        <div className="w-3 h-3 bg-secondary-500 rounded-full animate-bounce mx-1" style={{ animationDelay: "150ms" }}></div>
+        <div className="w-3 h-3 bg-primary-500 rounded-full animate-bounce ml-1" style={{ animationDelay: "300ms" }}></div>
+      </div>
+      <p className="text-gray-300">Loading visualization...</p>
+    </div>
+  </div>
+);
 
 const DieWithASmile = () => {
-  // State utama: audio, lirik, status play, dan flag UI
-  const [currentTime, setCurrentTime] = useState(0)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [audioLevel, setAudioLevel] = useState([])
-  const [duration, setDuration] = useState(0)
-  const [activeLyric, setActiveLyric] = useState("")
-  const [isChorus, setIsChorus] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
-  const [showInfo, setShowInfo] = useState(false)
-
-  // Refs untuk mencegah re-render berlebih
-  const lastActiveIndexRef = useRef(-1)
-  const animationFrameRef = useRef(null)
-  const isMountedRef = useRef(true)
-  const inactivityTimerRef = useRef(null)
-
-  // Deteksi perangkat mobile secara responsif
+  // Core state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [audioLevel, setAudioLevel] = useState([]);
+  const [currentLyric, setCurrentLyric] = useState("");
+  const [isChorus, setIsChorus] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  
+  // Refs
+  const isMountedRef = useRef(true);
+  const errorTimeoutRef = useRef(null);
+  const retryCountRef = useRef(0);
+  
+  // Check if current section is chorus
+  const checkChorusSection = useCallback((lyric) => {
+    if (!lyric) return false;
+    
+    const chorusLines = [
+      "IF THE WORLD WAS ENDING",
+      "I'D WANNA BE NEXT TO YOU",
+      "IF THE PARTY WAS OVER",
+      "AND OUR TIME ON EARTH",
+      "WAS THROUGH",
+      "I'D WANNA HOLD YOU",
+      "JUST FOR A WHILE",
+      "AND DIE WITH A SMILE",
+      "RIGHT NEXT TO YOU",
+      "NEXT TO YOU"
+    ];
+    
+    return chorusLines.some(line => 
+      lyric.includes(line) || line.includes(lyric)
+    );
+  }, []);
+  
+  // Handle window resize
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
-  }, [])
-
-  // Cleanup saat unmount
-  useEffect(() => {
+    const handleResize = () => {
+      if (!isMountedRef.current) return;
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    // Set initial value
+    handleResize();
+    
+    // Set up listener
+    window.addEventListener('resize', handleResize);
+    
     return () => {
-      isMountedRef.current = false
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
-      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current)
-    }
-  }, [])
-
-  // Auto-hide controls tidak lagi dibutuhkan karena header sudah dihapus
-  // (Jika di kemudian hari ingin menambahkan UI kontrol tambahan, mekanisme ini dapat diaktifkan kembali)
-  // Contoh: hapus listener inactivity jika tidak digunakan
-
-  // Fungsi utilitas: cari lirik aktif menggunakan binary search
-  const findActiveLyric = useCallback((time) => {
-    let start = 0,
-        end = lyrics.length - 1,
-        result = -1
-    while (start <= end) {
-      const mid = Math.floor((start + end) / 2)
-      if (lyrics[mid].time <= time) {
-        result = mid
-        start = mid + 1
-      } else {
-        end = mid - 1
-      }
-    }
-    if (result !== -1) {
-      const nextIndex = result + 1
-      if (nextIndex < lyrics.length && time >= lyrics[nextIndex].time) {
-        return { index: nextIndex, text: lyrics[nextIndex].text }
-      }
-      return { index: result, text: lyrics[result].text }
-    }
-    return null
-  }, [])
-
-  // Update waktu dan lirik
-  const handleTimeUpdate = useCallback((time) => {
-    if (!isMountedRef.current) return
-    setCurrentTime(time)
-    const activeData = findActiveLyric(time)
-    if (activeData) {
-      const { index, text } = activeData
-      if (index !== lastActiveIndexRef.current) {
-        lastActiveIndexRef.current = index
-        setActiveLyric(text)
-        setIsChorus(chorusLines.some(line => text.includes(line) || line.includes(text)))
-      }
-    }
-  }, [findActiveLyric])
-
-  // Update status play (tetap sederhana)
-  const handlePlayStateChange = useCallback((playing) => {
-    if (!isMountedRef.current) return
-    setIsPlaying(playing)
-  }, [])
-
-  // Update audio level dengan throttling
-  const handleAudioLevelUpdate = useCallback((levels) => {
-    if (!isMountedRef.current) return
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current)
-    animationFrameRef.current = requestAnimationFrame(() => {
-      setAudioLevel(levels)
-    })
-  }, [])
-
-  // Update durasi audio
-  const handleDurationUpdate = useCallback((newDuration) => {
-    if (!isMountedRef.current) return
-    setDuration(newDuration)
-  }, [])
-
-  // Hapus keyboard shortcut untuk spacebar, hanya biarkan shortcut untuk info jika dibutuhkan
-  // Untuk saat ini, shortcut keyboard dinonaktifkan agar tidak mengganggu user
-  // Jika diperlukan, handler untuk 'i' bisa diaktifkan dengan kode berikut:
-  /*
-  const handleKeyDown = useCallback((e) => {
-    if (e.key === "i") setShowInfo(prev => !prev)
-  }, [])
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+  
+  // Set mounted flag on initialization
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleKeyDown])
-  */
+    isMountedRef.current = true;
+    
+    if (!isInitialized) {
+      // Wait a bit to ensure components have time to mount
+      const initTimer = setTimeout(() => {
+        if (isMountedRef.current) {
+          setIsInitialized(true);
+        }
+      }, 500);
+      
+      return () => {
+        clearTimeout(initTimer);
+      };
+    }
+    
+    return () => {
+      isMountedRef.current = false;
+      
+      // Clear any pending timeouts
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+      }
+    };
+  }, [isInitialized]);
+  
+  // Find current lyric based on time
+  useEffect(() => {
+    if (!currentTime) return;
+    
+    // Import utils dynamically to avoid circular dependencies
+    const findCurrentLyric = () => {
+      try {
+        // Use dynamic import to avoid bundler issues
+        import("../lib/utils").then(({ lyrics }) => {
+          if (!isMountedRef.current) return;
+          
+          // Binary search to find the current lyric
+          let start = 0;
+          let end = lyrics.length - 1;
+          let result = -1;
+          
+          while (start <= end) {
+            const mid = Math.floor((start + end) / 2);
+            if (lyrics[mid].time <= currentTime) {
+              result = mid;
+              start = mid + 1;
+            } else {
+              end = mid - 1;
+            }
+          }
+          
+          if (result !== -1) {
+            // Check if next lyric is closer
+            const nextIndex = result + 1;
+            if (nextIndex < lyrics.length && 
+                lyrics[nextIndex].time - currentTime < 0.1) { // Tolerance of 100ms
+              setCurrentLyric(lyrics[nextIndex].text);
+              setIsChorus(checkChorusSection(lyrics[nextIndex].text));
+            } else {
+              setCurrentLyric(lyrics[result].text);
+              setIsChorus(checkChorusSection(lyrics[result].text));
+            }
+          }
+        }).catch(error => {
+          console.error("Error loading lyrics:", error);
+        });
+      } catch (error) {
+        console.error("Error finding current lyric:", error);
+      }
+    };
+    
+    findCurrentLyric();
+  }, [currentTime, checkChorusSection]);
 
-  // Global error handler
+  // Handle play state change
+  const handlePlayStateChange = useCallback((playing) => {
+    if (!isMountedRef.current) return;
+    setIsPlaying(playing);
+  }, []);
+  
+  // Handle time update
+  const handleTimeUpdate = useCallback((time) => {
+    if (!isMountedRef.current) return;
+    setCurrentTime(time);
+  }, []);
+  
+  // Handle duration update
+  const handleDurationUpdate = useCallback((newDuration) => {
+    if (!isMountedRef.current) return;
+    setDuration(newDuration);
+  }, []);
+  
+  // Handle audio level update
+  const handleAudioLevelUpdate = useCallback((audioData) => {
+    if (!isMountedRef.current) return;
+    setAudioLevel(audioData);
+  }, []);
+  
+  // Handle errors
   const handleError = useCallback((error) => {
-    console.error("Application error:", error)
-  }, [])
-
+    if (!isMountedRef.current) return;
+    console.error("Audio error:", error);
+    
+    // Increment retry count
+    retryCountRef.current += 1;
+    
+    // Set error state
+    setHasError(true);
+    setErrorMessage(error.message || "Terjadi kesalahan saat memuat audio.");
+    
+    // Clear previous error timeout
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+    
+    // Auto-retry after delay if not too many retries
+    if (retryCountRef.current < 3) {
+      errorTimeoutRef.current = setTimeout(() => {
+        if (isMountedRef.current) {
+          setHasError(false);
+          // Force refresh AudioPlayer by changing a key
+          setIsInitialized(false);
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              setIsInitialized(true);
+            }
+          }, 500);
+        }
+      }, 3000);
+    }
+  }, []);
+  
+  // Catch any unhandled errors and show error UI
+  const handleComponentError = useCallback((error, errorInfo) => {
+    console.error("Component error:", error, errorInfo);
+    setHasError(true);
+    setErrorMessage("Terjadi kesalahan pada aplikasi. Mohon refresh halaman.");
+  }, []);
+  
+  // Hard refresh function
+  const handleHardRefresh = useCallback(() => {
+    // Force page reload
+    window.location.reload();
+  }, []);
+  
   return (
-    <motion.div
-      className="relative min-h-screen overflow-hidden font-body bg-dark-950"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 1 }}
-      style={{ transform: "translateZ(0)" }}
-    >
-      {/* BACKGROUND */}
-      <ErrorBoundary>
-        <Suspense fallback={<div className="fixed inset-0 bg-black" />}>
-          <MemoizedBackground
-            isPlaying={isPlaying}
-            audioLevel={audioLevel}
-            currentLyric={activeLyric}
-            isChorus={isChorus}
-          />
-        </Suspense>
-      </ErrorBoundary>
-
-      {/* TAMPILAN UTAMA: LYRICS VISUALIZER & CODE VISUALIZER */}
-      <ErrorBoundary>
-        <LyricsVisualizer currentTime={currentTime} isPlaying={isPlaying} audioLevel={audioLevel} />
-      </ErrorBoundary>
-      <ErrorBoundary>
-        <CodeVisualizer
-          currentTime={currentTime}
-          isPlaying={isPlaying}
-          currentLyric={activeLyric}
-          isMobile={isMobile}
+    <ErrorBoundary onError={handleComponentError}>
+      <div className="relative min-h-screen overflow-hidden">
+        {/* Background visualization */}
+        <Background 
+          isPlaying={isPlaying} 
+          audioLevel={audioLevel} 
+          currentLyric={currentLyric}
           isChorus={isChorus}
         />
-      </ErrorBoundary>
-
-      {/* AUDIO PLAYER - TETAP DITAMPILKAN */}
-      <ErrorBoundary>
-        <div className="fixed bottom-0 left-0 right-0 z-50">
-          <AudioPlayer
-            onTimeUpdate={handleTimeUpdate}
-            onPlayStateChange={handlePlayStateChange}
-            onAudioLevelUpdate={handleAudioLevelUpdate}
-            onDurationUpdate={handleDurationUpdate}
-            onError={handleError}
-            isPlaying={isPlaying}
-            currentTime={currentTime}
-            duration={duration}
-          />
-        </div>
-      </ErrorBoundary>
-
-      {/* INFO PANEL (opsional) */}
-      <AnimatePresence>
-        {showInfo && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-6"
-            style={{ backdropFilter: "blur(12px)" }}
-          >
-            <div className="bg-gray-900/90 rounded-2xl p-8 max-w-2xl w-full border border-gray-700 shadow-2xl">
-              <h2 className="text-3xl font-bold mb-4 text-white">About This Experience</h2>
-              <p className="text-gray-300 mb-4">
-                This immersive audio-visual experience combines space-themed visuals with synchronized lyrics and code visualization.
+        
+        {/* Main content */}
+        <main className="relative z-10 min-h-screen flex flex-col items-center justify-center px-4 py-8">
+          <div className="w-full max-w-4xl mx-auto">
+            {/* Header */}
+            <motion.header 
+              className="mb-8 text-center"
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+              <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold font-display mb-2 text-gradient animate-text-glow">
+                Die With A Smile
+              </h1>
+              <p className="text-lg text-gray-300 opacity-80">
+                Bruno Mars & Lady Gaga
               </p>
-              <p className="text-gray-300 mb-6">
-                The dynamic background reacts to music with stunning starfields, galaxies, and nebula effects that intensify during chorus segments.
-              </p>
-              <div className="flex justify-end">
+            </motion.header>
+            
+            {/* Error message */}
+            {hasError && (
+              <div className="mb-8 p-4 bg-red-900/30 border border-red-500 rounded-lg text-center">
+                <p className="text-red-200 mb-3">{errorMessage}</p>
                 <button
-                  onClick={() => setShowInfo(false)}
-                  className="px-6 py-2 bg-pink-600 hover:bg-pink-700 rounded-lg text-white transition-colors"
+                  onClick={handleHardRefresh}
+                  className="px-4 py-2 bg-primary-600 hover:bg-primary-700 transition-colors rounded-md text-white"
                 >
-                  Close
+                  Refresh Halaman
                 </button>
               </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  )
-}
+            )}
+            
+            {/* Audio player component */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+              className="mb-8"
+            >
+              <AudioPlayer
+                onTimeUpdate={handleTimeUpdate}
+                onPlayStateChange={handlePlayStateChange}
+                onAudioLevelUpdate={handleAudioLevelUpdate}
+                onDurationUpdate={handleDurationUpdate}
+                onError={handleError}
+                isPlaying={isPlaying}
+                currentTime={currentTime}
+              />
+            </motion.div>
+            
+            {/* Visualizer components */}
+            <Suspense fallback={<LoadingFallback />}>
+              {isInitialized && (
+                <>
+                  {/* Code visualizer overlay */}
+                  <CodeVisualizer
+                    currentTime={currentTime}
+                    isPlaying={isPlaying}
+                    currentLyric={currentLyric}
+                    isMobile={isMobile}
+                    audioLevel={audioLevel}
+                  />
+                  
+                  {/* Lyrics visualizer overlay */}
+                  <LyricsVisualizer
+                    currentTime={currentTime}
+                    isPlaying={isPlaying}
+                    audioLevel={audioLevel}
+                  />
+                </>
+              )}
+            </Suspense>
+          </div>
+        </main>
+        
+        {/* Footer */}
+        <footer className="absolute bottom-0 left-0 right-0 py-2 px-4 text-center text-xs text-gray-500 z-20">
+          <p>Created with ❤️ using React + Framer Motion</p>
+        </footer>
+      </div>
+    </ErrorBoundary>
+  );
+};
 
-export default DieWithASmile
+export default DieWithASmile;

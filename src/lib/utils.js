@@ -52,7 +52,43 @@ export function debounce(func, wait) {
   };
 }
 
-// Updated SRT timestamp conversion that is more precise
+// Throttle function - limits execution rate
+export function throttle(func, limit) {
+  let lastFunc;
+  let lastRan;
+  return function() {
+    const context = this;
+    const args = arguments;
+    if (!lastRan) {
+      func.apply(context, args);
+      lastRan = Date.now();
+    } else {
+      clearTimeout(lastFunc);
+      lastFunc = setTimeout(function() {
+        if ((Date.now() - lastRan) >= limit) {
+          func.apply(context, args);
+          lastRan = Date.now();
+        }
+      }, limit - (Date.now() - lastRan));
+    }
+  };
+}
+
+// Detects low-performance devices
+export function isLowPerfDevice() {
+  // Check for mobile
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Check for older browsers
+  const isOldBrowser = /MSIE|Trident|Edge\/1[0-5]/i.test(navigator.userAgent);
+  
+  // Check for reasonable CPU cores (if available)
+  const hasWeakCPU = navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4;
+  
+  return isMobile || isOldBrowser || hasWeakCPU;
+}
+
+// SRT timestamp conversion - more precise
 export function srtTimestampToSeconds(timestamp) {
   // Format: 00:00:00,000 or 00:00:00.000
   const normalizedTimestamp = timestamp.replace(',', '.');
@@ -102,13 +138,13 @@ export function parseSRT(srtContent) {
 // Optimized lyrics data based on the provided SRT file
 export const lyrics = [
   { time: 0.00, text: "..." },
-  { time: 3.295, text: "UHH UHH" },
-  { time: 6.381, text: "..." },
-  { time: 8.634, text: "I, I JUST WOKE UP FROM A DREAM" },
-  { time: 15.557, text: "WHERE YOU AND I HAD TO SAY GOODBYE" },
-  { time: 20.270, text: "AND I DON'T KNOW WHAT IT ALL MEANS" },
-  { time: 24.775, text: "BUT SINCE I SURVIVED I REALIZED" },
-  { time: 29.071, text: "WHEREVER YOU GO THAT'S WHERE I'LL FOLLOW" },
+  { time: 3.00, text: "UHH UHH" },
+  { time: 6.000, text: "..." },
+  { time: 8.20, text: "I, I JUST WOKE UP FROM A DREAM" },
+  { time: 15.00, text: "WHERE YOU AND I HAD TO SAY GOODBYE" },
+  { time: 20.00, text: "AND I DON'T KNOW WHAT IT ALL MEANS" },
+  { time: 24.00, text: "BUT SINCE I SURVIVED I REALIZED" },
+  { time: 28.00, text: "WHEREVER YOU GO THAT'S WHERE I'LL FOLLOW" },
   { time: 33.867, text: "NOBODY'S PROMISED TOMORROW" },
   { time: 38.497, text: "SO IMMA LOVE YOU EVERY NIGHT LIKE IT'S THE LAST NIGHT" },
   { time: 42.542, text: "LIKE IT'S THE LAST NIGHT" },
@@ -165,176 +201,25 @@ export const chorusLines = [
   "NEXT TO YOU"
 ];
 
-// Updated SRT data based on exact timing
-export const srtData = `1
-00:00:00,626 --> 00:00:03,212
-♪♪♪
-2
-00:00:03,295 --> 00:00:06,298
-♪ UHH UHH ♪
-3
-00:00:06,381 --> 00:00:08,550
-♪♪♪
-4
-00:00:08,634 --> 00:00:14,932
-♪ I, I JUST WOKE UP
-FROM A DREAM ♪
-5
-00:00:15,557 --> 00:00:18,977
-♪ WHERE YOU AND I HAD
-TO SAY GOODBYE ♪
-6
-00:00:20,270 --> 00:00:23,941
-♪ AND I DON'T KNOW
-WHAT IT ALL MEANS ♪
-7
-00:00:24,775 --> 00:00:28,528
-♪ BUT SINCE I SURVIVED
-I REALIZED ♪
-8
-00:00:29,071 --> 00:00:33,700
-♪ WHEREVER YOU GO
-THAT'S WHERE I'LL FOLLOW ♪
-9
-00:00:33,867 --> 00:00:37,996
-♪ NOBODY'S PROMISED TOMORROW ♪
-10
-00:00:38,497 --> 00:00:42,042
-♪ SO IMMA LOVE YOU EVERY NIGHT
-LIKE IT'S THE LAST NIGHT ♪
-11
-00:00:42,542 --> 00:00:44,336
-♪ LIKE IT'S THE LAST NIGHT ♪
-12
-00:00:44,711 --> 00:00:53,345
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT (TO YOU) ♪
-13
-00:00:53,679 --> 00:01:02,521
-♪ IF THE PARTY WAS OVER AND OUR
-TIME ON EARTH (WAS THROUGH) ♪
-14
-00:01:02,771 --> 00:01:07,359
-♪ I'D WANNA HOLD YOU
-JUST FOR A WHILE ♪
-15
-00:01:07,442 --> 00:01:11,446
-♪ AND DIE WITH A SMILE ♪
-16
-00:01:11,989 --> 00:01:19,037
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT TO YOU ♪
-17
-00:01:21,039 --> 00:01:23,583
-♪ (WOO OOH) ♪
-18
-00:01:25,085 --> 00:01:27,546
-♪ OOH LOST ♪
-19
-00:01:28,588 --> 00:01:31,842
-♪ LOST IN THE WORDS
-THAT WE SCREAM ♪
-20
-00:01:32,843 --> 00:01:37,306
-♪ I DON'T EVEN WANNA
-DO THIS ANYMORE ♪
-21
-00:01:37,639 --> 00:01:40,892
-[DUO] ♪ CUZ YOU ALREADY
-KNOW WHAT YOU MEAN TO ME ♪
-22
-00:01:41,226 --> 00:01:45,564
-♪ AND OUR LOVE IS THE ONLY
-WAR WORTH FIGHTING FOR ♪
-23
-00:01:46,815 --> 00:01:50,944
-♪ WHEREVER YOU GO
-THAT'S WHERE I'LL FOLLOW ♪
-24
-00:01:51,445 --> 00:01:55,198
-♪ NOBODY'S PROMISED TOMORROW ♪
-25
-00:01:55,907 --> 00:01:59,453
-♪ SO IMMA LOVE YOU EVERY NIGHT
-LIKE IT'S THE LAST NIGHT ♪
-26
-00:01:59,828 --> 00:02:01,496
-♪ LIKE IT'S THE LAST NIGHT ♪
-27
-00:02:02,289 --> 00:02:10,797
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT TO YOU ♪
-28
-00:02:11,173 --> 00:02:13,842
-♪ IF THE PARTY WAS OVER ♪
-29
-00:02:13,925 --> 00:02:20,140
-♪ AND OUR TIME ON EARTH
-WAS THROUGH ♪
-30
-00:02:20,223 --> 00:02:22,184
-♪ I'D WANNA HOLD YOU ♪
-31
-00:02:22,601 --> 00:02:24,227
-♪ JUST FOR A WHILE ♪
-32
-00:02:24,811 --> 00:02:28,857
-♪ AND DIE WITH A SMILE ♪
-33
-00:02:29,566 --> 00:02:35,697
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT TO YOU ♪
-34
-00:02:38,116 --> 00:02:40,786
-♪ RIGHT NEXT TO YOU ♪
-35
-00:02:42,954 --> 00:02:45,832
-♪ NEXT TO YOU ♪
-36
-00:02:47,459 --> 00:02:50,420
-♪ RIGHT NEXT TO YOU ♪
-37
-00:02:51,171 --> 00:02:54,216
-♪ [BOTH VOCALIZING] ♪
-38
-00:02:55,967 --> 00:02:59,638
-♪♪♪
-39
-00:03:10,482 --> 00:03:17,280
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT (TO YOU) ♪
-40
-00:03:19,574 --> 00:03:26,957
-♪ IF THE PARTY WAS OVER
-AND OUR TIME ON EARTH
-(WAS THROUGH) ♪
-41
-00:03:28,667 --> 00:03:32,712
-♪ I'D WANNA HOLD YOU
-JUST FOR A WHILE ♪
-42
-00:03:33,338 --> 00:03:37,259
-♪ AND DIE WITH A SMILE ♪
-43
-00:03:37,968 --> 00:03:45,058
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT TO YOU ♪
-44
-00:03:46,685 --> 00:03:53,358
-♪ IF THE WORLD WAS ENDING
-I'D WANNA BE NEXT TO YOU ♪
-45
-00:03:53,442 --> 00:03:55,235
-♪♪♪
-46
-00:03:55,944 --> 00:03:59,156
-♪ [VOCALIZING] ♪
-47
-00:03:59,239 --> 00:04:02,909
-♪ I'D WANNA BE NEXT TO YOU ♪`;
+// Beat drop timestamp ranges - for enhanced visual effects
+export const beatDropRanges = [
+  [44.5, 48],    // First chorus start
+  [149, 152],    // Later chorus start
+  [190, 194],    // Final chorus start
+  [217, 221],    // Outro chorus
+];
+
+// Check if current time is during a beat drop
+export function isInBeatDrop(currentTime) {
+  return beatDropRanges.some(([start, end]) => 
+    currentTime >= start && currentTime <= end
+  );
+}
 
 // Get current active lyric - more accurate
 export function getCurrentLyric(currentTime) {
+  if (!currentTime) return null;
+  
   // Binary search for better performance with sorted data
   let start = 0;
   let end = lyrics.length - 1;
@@ -372,14 +257,25 @@ export function isChorusLine(text) {
   );
 }
 
+// Calculate the duration of a lyric line
+export function getLyricDuration(index) {
+  if (index < 0 || index >= lyrics.length - 1) return 3; // Default duration
+  
+  return lyrics[index + 1].time - lyrics[index].time;
+}
+
 // Find active lyric word at specific time point for word-by-word animation
 export function getActiveWord(currentTime, lineStartTime, lineDuration, wordCount) {
   if (!currentTime || !lineStartTime || !lineDuration || !wordCount) return -1;
   
+  // Calculate elapsed time since line started
   const elapsedTime = currentTime - lineStartTime;
   if (elapsedTime < 0) return -1;
   
+  // Calculate time per word for highlights
   const timePerWord = lineDuration / wordCount;
+  
+  // Get the current word index based on elapsed time
   const currentWordIndex = Math.min(Math.floor(elapsedTime / timePerWord), wordCount - 1);
   
   return Math.max(0, currentWordIndex);
@@ -398,6 +294,7 @@ export function getLyricTimingInfo(currentIndex) {
     duration = nextLyric.time - currentLyric.time;
   }
   
+  // Split into words and filter empty strings
   const words = currentLyric.text.split(' ').filter(w => w.trim().length > 0);
   
   return {
@@ -407,4 +304,67 @@ export function getLyricTimingInfo(currentIndex) {
     words: words,
     isChorus: isChorusLine(currentLyric.text)
   };
+}
+
+// Calculate audio intensity from frequency data
+export function calculateAudioIntensity(audioData) {
+  if (!audioData || audioData.length === 0) return 1;
+  
+  // Calculate the average of low frequencies (bass)
+  const bassRange = Math.min(10, audioData.length);
+  let bassSum = 0;
+  
+  for (let i = 0; i < bassRange; i++) {
+    bassSum += audioData[i] || 0;
+  }
+  
+  const bassAvg = bassSum / (bassRange * 255); // Normalize to 0-1
+  
+  // Scale for more dramatic effect (1.0 - 2.0 range)
+  return 1 + bassAvg;
+}
+
+// Detect beat from audio data
+export function detectBeat(audioData, threshold = 0.5, lastBeatTime = 0) {
+  if (!audioData || audioData.length === 0) return false;
+  
+  // Calculate intensity
+  const intensity = calculateAudioIntensity(audioData);
+  
+  // Cooldown to prevent too frequent beat detection
+  const now = Date.now();
+  const beatCooldown = 300; // ms
+  
+  // Return beat detection result
+  return intensity > threshold && (now - lastBeatTime) > beatCooldown ? now : false;
+}
+
+// Generate artistic curve points for visual effects
+export function generateCurvePoints(count, amplitude, frequency) {
+  const points = [];
+  for (let i = 0; i < count; i++) {
+    const x = i / (count - 1);
+    const y = Math.sin(x * frequency * Math.PI) * amplitude;
+    points.push({ x, y });
+  }
+  return points;
+}
+
+// Create a smooth wave path for SVG
+export function createWavePath(points, width, height, centerY) {
+  if (!points || points.length < 2) return '';
+  
+  let path = `M 0 ${centerY}`;
+  
+  for (let i = 0; i < points.length - 1; i++) {
+    const currentPoint = points[i];
+    const nextPoint = points[i + 1];
+    
+    // Calculate control points for smooth curve
+    const controlX = (currentPoint.x + nextPoint.x) / 2 * width;
+    
+    path += ` S ${controlX} ${centerY + currentPoint.y * height}, ${nextPoint.x * width} ${centerY + nextPoint.y * height}`;
+  }
+  
+  return path;
 }

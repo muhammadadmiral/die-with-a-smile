@@ -1,1318 +1,951 @@
-import React, { useEffect, useRef, useState, useMemo } from "react";
-import { motion, useAnimationControls } from "framer-motion";
-import * as THREE from "three";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import gsap from "gsap";
-import {
-  Stars,
-  Trail,
-  Cloud,
-  Sparkles
-} from "@react-three/drei";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { debounce } from "../lib/utils";
+import * as THREE from 'three';
 
-import {
-  EffectComposer,
-  Bloom,
-  ChromaticAberration,
-  GodRays,
-  Vignette
-} from "@react-three/postprocessing";
-
-// Utility functions
-const lerp = (start, end, t) => start + (end - start) * t;
-const random = (min, max) => Math.random() * (max - min) + min;
-const randomInt = (min, max) => Math.floor(random(min, max));
-
-// Configuration object for better organization and tuning
-const CONFIG = {
-  MOBILE: {
-    CAMERA_DISTANCE: 25,
-    PARTICLE_COUNT: 2000,
-    STAR_COUNT: 3000,
-    PLANET_SCALE: 0.7,
-    NEBULA_SCALE: 1.2,
-    SHOW_SECONDARY_EFFECTS: false
-  },
-  DESKTOP: {
-    CAMERA_DISTANCE: 15,
-    PARTICLE_COUNT: 8000,
-    STAR_COUNT: 7000,
-    PLANET_SCALE: 1.0,
-    NEBULA_SCALE: 1.0,
-    SHOW_SECONDARY_EFFECTS: true
-  },
-  TRANSITION_DURATION: 2.0, // seconds
-  SOLAR_SYSTEM: {
-    PLANET_COUNT: 8,
-    SUN_SIZE: 5,
-    ORBIT_SPREAD: 10
-  },
-  COLORS: {
-    VERSE: {
-      PRIMARY: "#7c3aed",
-      SECONDARY: "#3b82f6",
-      BG_DARK: "#0a0a18",
-      BG_MID: "#0f0a20"
-    },
-    CHORUS: {
-      PRIMARY: "#e34a7b",
-      SECONDARY: "#ff6b9d",
-      BG_DARK: "#120010",
-      BG_MID: "#220022"
-    }
-  }
-};
-
-// Main Background component
-const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus, onLoad }) => {
-  // State and refs
-  const [audioIntensity, setAudioIntensity] = useState(0.5);
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== "undefined" ? window.innerWidth < 768 : false
-  );
-  const [windowSize, setWindowSize] = useState({
-    width: typeof window !== "undefined" ? window.innerWidth : 1200,
-    height: typeof window !== "undefined" ? window.innerHeight : 800,
-  });
+const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
+  // Canvas and Three.js refs
+  const canvasRef = useRef(null);
+  const threeCanvasRef = useRef(null);
+  const threeSceneRef = useRef(null);
+  const threeRendererRef = useRef(null);
+  const threeCameraRef = useRef(null);
+  const threeTimeRef = useRef(0);
+  const particleSystemRef = useRef(null);
   
-  // Animation controls for DOM elements
-  const glowControls = useAnimationControls();
-  const chorusGlowControls = useAnimationControls();
-  const nebulaControls = useAnimationControls();
-  const waveControls = useAnimationControls();
-  
-  // Refs for performance optimization
-  const lastAudioProcessTimeRef = useRef(0);
-  const choruxTransitionRef = useRef(false);
-  const transitionTimeRef = useRef(0);
-  const hueRef = useRef(280); // Initial color: purple
-  const intensityRef = useRef({ current: 0.5, target: 0.5 });
-  const lyricsInfluenceRef = useRef({ x: 0, y: 0, strength: 0 });
-  const deviceConfigRef = useRef(isMobile ? CONFIG.MOBILE : CONFIG.DESKTOP);
-  
-  // Notify parent when background is loaded
+  // Animation and state refs
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [isMoving, setIsMoving] = useState(false);
+  const starsRef = useRef([]);
+  const particlesRef = useRef([]);
+  const lastRenderTimeRef = useRef(0);
+  const requestRef = useRef(null);
+  const threeAnimationRef = useRef(null);
+  const canvasContextRef = useRef(null);
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const pulseEffectRef = useRef(0);
+  const starFieldOpacityRef = useRef(1);
+  const glowIntensityRef = useRef({ current: 0.5, target: 0.5 });
+  const backgroundHueRef = useRef(280); // Initial purple-ish hue
+  const [mobileMode, setMobileMode] = useState(false);
+  const isMountedRef = useRef(true);
+  const chorus3DElementsRef = useRef([]);
+  const currentAudioIntensityRef = useRef(1);
+  const chorusTransitionRef = useRef(false);
+
+  // Track mouse movement for interactive effects
   useEffect(() => {
-    if (onLoad) {
-      const timer = setTimeout(() => {
-        onLoad();
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [onLoad]);
-  
-  // Responsive handling - with debounce
-  useEffect(() => {
-    let resizeTimeout;
-    const handleResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        const newIsMobile = window.innerWidth < 768;
-        setIsMobile(newIsMobile);
-        setWindowSize({
-          width: window.innerWidth,
-          height: window.innerHeight,
-        });
-        deviceConfigRef.current = newIsMobile ? CONFIG.MOBILE : CONFIG.DESKTOP;
-      }, 200); // Debounce resize events
+    const handleMouseMove = debounce((e) => {
+      if (!isMountedRef.current) return;
+      setMousePosition({
+        x: e.clientX,
+        y: e.clientY,
+      });
+      setIsMoving(true);
+
+      // Reset moving state after a short delay
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setIsMoving(false);
+        }
+      }, 100);
+    }, 50);
+
+    window.addEventListener("mousemove", handleMouseMove);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
     };
-    
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // Process audio levels for visualization
+  // Handle window resize
   useEffect(() => {
-    if (!audioLevel || audioLevel.length === 0) return;
+    const handleResize = () => {
+      if (!isMountedRef.current) return;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
 
-    const now = Date.now();
-    if (now - lastAudioProcessTimeRef.current < 50) return;
-    lastAudioProcessTimeRef.current = now;
-
-    // Enhanced frequency analysis for better reactivity
-    const bassRange = Math.min(15, audioLevel.length);
-    const subBassRange = Math.min(8, audioLevel.length);
-    const midRange = [Math.floor(audioLevel.length * 0.2), Math.floor(audioLevel.length * 0.6)];
-    const highRange = [Math.floor(audioLevel.length * 0.6), audioLevel.length];
-    const presenceRange = [Math.floor(audioLevel.length * 0.8), audioLevel.length];
-    
-    let bassSum = 0, subBassSum = 0, midSum = 0, highSum = 0, presenceSum = 0;
-    
-    // Process different frequency ranges
-    for (let i = 0; i < subBassRange; i++) {
-      subBassSum += audioLevel[i] || 0;
-    }
-    
-    for (let i = subBassRange; i < bassRange; i++) {
-      bassSum += audioLevel[i] || 0;
-    }
-    
-    for (let i = midRange[0]; i < midRange[1]; i++) {
-      midSum += audioLevel[i] || 0;
-    }
-    
-    for (let i = highRange[0]; i < highRange[1]; i++) {
-      highSum += audioLevel[i] || 0;
-    }
-    
-    for (let i = presenceRange[0]; i < presenceRange[1]; i++) {
-      presenceSum += audioLevel[i] || 0;
-    }
-    
-    const subBassAvg = subBassSum / subBassRange / 255;
-    const bassAvg = bassSum / (bassRange - subBassRange) / 255;
-    const midAvg = midSum / (midRange[1] - midRange[0]) / 255;
-    const highAvg = highSum / (highRange[1] - highRange[0]) / 255;
-    const presenceAvg = presenceSum / (presenceRange[1] - presenceRange[0]) / 255;
-    
-    // Calculate weighted intensity
-    const newIntensity = 1 + (
-      subBassAvg * 2.5 + 
-      bassAvg * 2 + 
-      midAvg * 1.5 + 
-      highAvg * 1 + 
-      presenceAvg * 0.8
-    ) / 4;
-
-    // Smooth out intensity changes
-    setAudioIntensity(prev => lerp(prev, newIntensity, 0.3));
-
-    if (isPlaying) {
-      // Update visual controls based on audio
-      glowControls.start({
-        opacity: isChorus ? 0.8 * newIntensity : 0.4 * newIntensity,
-        scale: isChorus ? 1 + 0.3 * bassAvg : 1 + 0.1 * bassAvg,
-        transition: { duration: 0.4 },
+      setWindowSize({
+        width,
+        height,
       });
+
+      // Set mobile mode for responsive handling
+      setMobileMode(width < 768);
       
-      chorusGlowControls.start({
-        opacity: isChorus ? 0.8 * newIntensity : 0,
-        scale: 1 + 0.2 * highAvg,
-        transition: { duration: 0.3 },
-      });
-      
-      nebulaControls.start({
-        opacity: 0.3 + 0.5 * bassAvg,
-        scale: 1 + 0.1 * midAvg,
-        x: 50 * (midAvg - 0.5),
-        transition: { duration: 0.5 },
-      });
-      
-      waveControls.start({
-        y: [-5 * newIntensity, 5 * newIntensity, -5 * newIntensity],
-        opacity: [0.5, 0.8 * newIntensity, 0.5],
-        transition: { duration: 4, repeat: Infinity },
-      });
-    }
-  }, [audioLevel, isPlaying, isChorus, glowControls, chorusGlowControls, nebulaControls, waveControls]);
+      // Update Three.js camera and renderer if they exist
+      if (threeCameraRef.current && threeRendererRef.current) {
+        threeCameraRef.current.aspect = width / height;
+        threeCameraRef.current.updateProjectionMatrix();
+        threeRendererRef.current.setSize(width, height);
+      }
+    };
 
-  // Update colors and effects based on lyrics and chorus state
+    handleResize(); // Initialize on mount
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  // Setup 3D environment with Three.js
   useEffect(() => {
-    // Track chorus transitions
-    if (choruxTransitionRef.current !== isChorus) {
-      choruxTransitionRef.current = isChorus;
-      transitionTimeRef.current = Date.now();
-    }
+    if (!threeCanvasRef.current || threeSceneRef.current) return;
     
-    hueRef.current = isChorus ? 320 : 280;
-    intensityRef.current.target = isChorus ? 0.9 : 0.5;
-
-    // Generate visual influences from lyrics
-    if (currentLyric && currentLyric !== "...") {
-      const lyricLength = currentLyric.length;
-      const influenceX = Math.sin(lyricLength * 0.2) * windowSize.width * 0.3;
-      const influenceY = Math.cos(lyricLength * 0.3) * windowSize.height * 0.3;
-      
-      lyricsInfluenceRef.current = {
-        x: influenceX,
-        y: influenceY,
-        strength: Math.min(1, lyricLength / 30) * 0.7,
-      };
-    } else {
-      lyricsInfluenceRef.current = { x: 0, y: 0, strength: 0 };
-    }
-  }, [isChorus, currentLyric, windowSize]);
-
-  // Space scene component - handles the 3D environment
-  const SpaceScene = ({ audioIntensity, isChorus, isPlaying }) => {
-    const { camera, scene, gl } = useThree();
-    const groupRef = useRef();
-    const starsRef = useRef();
-    const nebulaRef = useRef();
-    const galaxyRef = useRef();
-    const timeRef = useRef(0);
-    const choruxTransitionProgressRef = useRef(0);
+    // Create scene
+    const scene = new THREE.Scene();
+    threeSceneRef.current = scene;
     
-    // Setup the 3D scene
-    useEffect(() => {
-      // Configure renderer
-      gl.toneMapping = THREE.ACESFilmicToneMapping;
-      gl.toneMappingExposure = 1.2;
-      
-      // Initial camera setup - different for mobile
-      if (isMobile) {
-        camera.position.set(0, 5, CONFIG.MOBILE.CAMERA_DISTANCE);
-        camera.fov = 70; // Wider field of view for mobile
-      } else {
-        camera.position.set(0, 0, CONFIG.DESKTOP.CAMERA_DISTANCE);
-        camera.fov = 60;
-      }
-      camera.updateProjectionMatrix();
-      
-      // Add fog for depth
-      scene.fog = new THREE.FogExp2(
-        isChorus ? CONFIG.COLORS.CHORUS.BG_DARK : CONFIG.COLORS.VERSE.BG_DARK, 
-        isMobile ? 0.002 : 0.003
-      );
-      
-      return () => {
-        scene.fog = null;
-        gl.toneMapping = THREE.NoToneMapping;
-      };
-    }, [camera, scene, gl, isMobile]);
-
-    // Handle smooth transitions between chorus and verse
-    useEffect(() => {
-      // Create a timeline for smoother coordinated animations
-      const timeline = gsap.timeline({
-        defaults: { duration: CONFIG.TRANSITION_DURATION, ease: "power2.inOut" }
-      });
-      
-      // Target values based on section and device
-      const targetZ = isChorus 
-        ? (isMobile ? CONFIG.MOBILE.CAMERA_DISTANCE - 5 : CONFIG.DESKTOP.CAMERA_DISTANCE - 5)
-        : (isMobile ? CONFIG.MOBILE.CAMERA_DISTANCE : CONFIG.DESKTOP.CAMERA_DISTANCE);
-      
-      const targetY = isChorus ? (isMobile ? 8 : 2) : (isMobile ? 5 : 0);
-      const targetRotX = isChorus ? (isMobile ? 0.3 : 0.2) : (isMobile ? 0.15 : 0);
-      
-      // Camera movement
-      timeline.to(camera.position, {
-        z: targetZ,
-        y: targetY,
-        ease: "power2.inOut"
-      }, 0);
-      
-      // Camera rotation
-      timeline.to(camera.rotation, {
-        x: targetRotX,
-        ease: "power2.inOut" 
-      }, 0);
-      
-      // Fog color transition
-      const fogColorStart = new THREE.Color(scene.fog.color);
-      const fogColorEnd = new THREE.Color(
-        isChorus ? CONFIG.COLORS.CHORUS.BG_DARK : CONFIG.COLORS.VERSE.BG_DARK
-      );
-      
-      // Update fog in the animation loop for smoother color transition
-      timeline.to(scene.fog, {
-        density: isChorus ? (isMobile ? 0.0015 : 0.002) : (isMobile ? 0.002 : 0.003),
-        onUpdate: () => {
-          // Calculate progress through the timeline for this tween
-          const progress = timeline.progress();
-          scene.fog.color.copy(fogColorStart).lerp(fogColorEnd, progress);
-        }
-      }, 0);
-      
-      return () => timeline.kill();
-    }, [isChorus, camera, scene, isMobile]);
-
-    // Main animation loop
-    useFrame((_, delta) => {
-      timeRef.current += delta * (isPlaying ? 0.5 : 0.1);
-      
-      // Smooth transitions between chorus and verse
-      const targetTransitionProgress = isChorus ? 1 : 0;
-      choruxTransitionProgressRef.current = lerp(
-        choruxTransitionProgressRef.current,
-        targetTransitionProgress,
-        delta * 1.5 // Speed of transition
-      );
-      
-      // Apply group rotation
-      if (groupRef.current) {
-        // Slower rotation when not playing, faster with audio intensity
-        groupRef.current.rotation.y += delta * (isPlaying ? 0.05 * audioIntensity : 0.01);
-        
-        // Subtle wobble effect based on audio
-        if (isPlaying && audioIntensity > 1.2) {
-          groupRef.current.rotation.x = Math.sin(timeRef.current * 0.2) * 0.03 * (audioIntensity - 1);
-        }
-      }
-      
-      // Update stars
-      if (starsRef.current && isPlaying) {
-        // Make stars pulse with the beat
-        const pulseScale = 1 + 0.05 * Math.sin(timeRef.current * 2) * audioIntensity;
-        starsRef.current.scale.set(pulseScale, pulseScale, 1);
-      }
-      
-      // Update nebula
-      if (nebulaRef.current && isPlaying) {
-        // Dynamic opacity based on audio
-        nebulaRef.current.material.opacity = 0.3 + 0.2 * Math.sin(timeRef.current) * audioIntensity;
-        
-        // Subtle expansion and contraction
-        const breathScale = deviceConfigRef.current.NEBULA_SCALE * 
-          (1 + 0.1 * Math.sin(timeRef.current * 0.5) * audioIntensity);
-        nebulaRef.current.scale.set(breathScale, breathScale, breathScale);
-      }
-      
-      // Update galaxy
-      if (galaxyRef.current) {
-        // Rotate galaxy based on section and audio
-        galaxyRef.current.rotation.z += delta * 0.1 * (isChorus ? 1.5 : 1) * (isPlaying ? audioIntensity : 0.5);
-        
-        // Scale based on chorus/verse transition
-        const galaxyScale = lerp(1, 1.5, choruxTransitionProgressRef.current);
-        galaxyRef.current.scale.set(galaxyScale, galaxyScale, 1);
-      }
-    });
-
-    return (
-      <group ref={groupRef}>
-        {/* Add post-processing effects */}
-        <EffectComposer>
-          <Bloom 
-            intensity={1.2} 
-            luminanceThreshold={0.6} 
-            luminanceSmoothing={0.9} 
-          />
-          <ChromaticAberration
-            offset={[0.002, 0.002].map(x => x * audioIntensity)}
-          />
-          <Vignette darkness={0.5} offset={0.5} />
-        </EffectComposer>
-
-        {/* Ambient lighting */}
-        <ambientLight intensity={0.15} />
-        
-        {/* Main light source with color based on section */}
-        <pointLight 
-          position={[0, 0, 5]} 
-          intensity={isChorus ? 0.7 : 0.3} 
-          color={isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY}
-          distance={40}
-        />
-
-        {/* Background stars - optimized count for device */}
-        <Stars
-          ref={starsRef}
-          radius={100}
-          depth={50}
-          count={deviceConfigRef.current.STAR_COUNT}
-          factor={5}
-          saturation={isChorus ? 0.7 : 0.5}
-          fade
-          speed={isPlaying ? 1 * audioIntensity : 0.2}
-        />
-
-        {/* Central galaxy with trails */}
-        <group
-          ref={galaxyRef}
-          position={[0, isMobile ? -5 : -2, isMobile ? -15 : -8]}
-          rotation={[0.5, 0, 0]}
-        >
-          {/* Galaxy core */}
-          <mesh>
-            <torusGeometry args={[5, 1.8, 2, 64]} />
-            <meshBasicMaterial 
-              color={isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY} 
-              transparent 
-              opacity={0.4} 
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-          
-          {/* Galaxy outer ring */}
-          <mesh rotation={[0, 0, Math.PI / 4]}>
-            <ringGeometry args={[7, 8, 64]} />
-            <meshBasicMaterial 
-              color={isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY} 
-              transparent 
-              opacity={0.15} 
-              side={THREE.DoubleSide}
-            />
-          </mesh>
-          
-          {/* Galaxy center glow */}
-          <mesh>
-            <sphereGeometry args={[1, 32, 32]} />
-            <meshBasicMaterial 
-              color={isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY} 
-              transparent 
-              opacity={0.6}
-            />
-          </mesh>
-          
-          {/* Sparkles around galaxy center */}
-          <Sparkles
-            count={50}
-            scale={[10, 10, 10]}
-            size={1.5}
-            speed={0.3}
-            opacity={0.7}
-            color={isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY}
-          />
-          
-          {/* Light source */}
-          <pointLight 
-            color={isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY} 
-            intensity={isPlaying ? 2 * audioIntensity : 0.5} 
-            distance={30} 
-          />
-        </group>
-
-        {/* Main nebula cloud */}
-        <Nebula
-          ref={nebulaRef}
-          position={[0, 0, -10]}
-          color={isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.PRIMARY}
-          intensity={audioIntensity}
-          isPlaying={isPlaying}
-          isMobile={isMobile}
-        />
-
-        {/* Cloud formations */}
-        <CloudFormation
-          count={isMobile ? 2 : 4}
-          intensity={audioIntensity}
-          isChorus={isChorus}
-          isPlaying={isPlaying}
-          scale={isMobile ? 1.5 : 1}
-        />
-
-        {/* Planets - show fewer on mobile */}
-        <PlanetSystem 
-          count={isMobile ? 3 : 6} 
-          intensity={audioIntensity}
-          isChorus={isChorus}
-          isPlaying={isPlaying}
-          scale={deviceConfigRef.current.PLANET_SCALE}
-          transitionProgress={choruxTransitionProgressRef.current}
-        />
-
-        {/* Particles effect */}
-        <SpaceParticles
-          count={deviceConfigRef.current.PARTICLE_COUNT / 10}
-          size={0.08}
-          intensity={audioIntensity}
-          isChorus={isChorus}
-          isPlaying={isPlaying}
-        />
-
-        {/* Special effects - conditionally rendered based on playing state */}
-        {isPlaying && (
-          <>
-            <ShootingStars 
-              count={isMobile ? 3 : 6} 
-              intensity={audioIntensity}
-              isChorus={isChorus}
-            />
-            
-            {/* Cosmic dust */}
-            <CosmicDust
-              count={deviceConfigRef.current.PARTICLE_COUNT}
-              size={0.03}
-              intensity={audioIntensity}
-              isChorus={isChorus}
-              isPlaying={isPlaying}
-            />
-            
-            {/* Only show comet on chorus or when lyrics are active */}
-            {(isChorus || (currentLyric && currentLyric !== "...")) && (
-              <Comet 
-                intensity={audioIntensity} 
-                isChorus={isChorus} 
-                count={isChorus ? 2 : 1}
-              />
-            )}
-          </>
-        )}
-      </group>
+    // Create camera
+    const camera = new THREE.PerspectiveCamera(
+      75,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
     );
-  };
-
-  // Nebula component - large colorful cloud
-  const Nebula = React.forwardRef(
-    ({ position, color, intensity, isPlaying, isMobile }, ref) => {
-      const meshRef = useRef();
-      const timeRef = useRef(0);
+    camera.position.z = 30;
+    threeCameraRef.current = camera;
+    
+    // Create renderer
+    const renderer = new THREE.WebGLRenderer({
+      canvas: threeCanvasRef.current,
+      alpha: true,
+      antialias: true
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    threeRendererRef.current = renderer;
+    
+    // Create particle system for 3D space
+    const particleCount = mobileMode ? 500 : 1000;
+    const particleGeometry = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleSizes = new Float32Array(particleCount);
+    const particleColors = new Float32Array(particleCount * 3);
+    
+    // Populate particles with random positions
+    for (let i = 0; i < particleCount; i++) {
+      const i3 = i * 3;
+      // Distribute particles in a sphere
+      const radius = Math.random() * 50 + 10;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
       
-      useFrame((_, delta) => {
-        timeRef.current += delta * (isPlaying ? 0.1 : 0.02);
-        
-        if (meshRef.current) {
-          // Slow rotation
-          meshRef.current.rotation.z += delta * 0.02;
-          meshRef.current.rotation.y += delta * 0.01;
-          
-          // Soft pulsing effect scaled by device
-          const scale = isMobile ? CONFIG.MOBILE.NEBULA_SCALE : CONFIG.DESKTOP.NEBULA_SCALE;
-          meshRef.current.scale.x = scale * (1 + 0.05 * Math.sin(timeRef.current) * intensity);
-          meshRef.current.scale.y = scale * (1 + 0.05 * Math.cos(timeRef.current * 1.3) * intensity);
-          meshRef.current.scale.z = scale;
-        }
-      });
+      particlePositions[i3] = radius * Math.sin(phi) * Math.cos(theta);  // x
+      particlePositions[i3 + 1] = radius * Math.sin(phi) * Math.sin(theta);  // y
+      particlePositions[i3 + 2] = radius * Math.cos(phi);  // z
       
-      return (
-        <mesh
-          ref={(node) => {
-            meshRef.current = node;
-            if (ref) ref.current = node;
-          }}
-          position={position}
-        >
-          <sphereGeometry args={[8, 64, 64]} />
-          <meshStandardMaterial
-            color={color}
-            transparent
-            opacity={isPlaying ? 0.35 * intensity : 0.15}
-            emissive={color}
-            emissiveIntensity={intensity * 0.2}
-            roughness={0.7}
-            metalness={0.3}
-            depthWrite={false}
-          />
-        </mesh>
-      );
+      // Random size for each particle
+      particleSizes[i] = Math.random() * 2 + 0.5;
+      
+      // Initialize with purple colors (will be updated in animation)
+      particleColors[i3] = 0.5;      // r
+      particleColors[i3 + 1] = 0.2;  // g
+      particleColors[i3 + 2] = 0.8;  // b
     }
-  );
-
-  // Cloud formation component - creates multiple cloud clusters
-  const CloudFormation = ({ count, intensity, isChorus, isPlaying, scale = 1 }) => {
-    const cloudRefs = useRef([]);
-    const timeRef = useRef(0);
     
-    // Generate cloud positions
-    const cloudData = useMemo(() => {
-      return Array.from({ length: count }, (_, i) => ({
-        position: [
-          random(-25, 25),
-          random(-15, 15),
-          random(-30, -5)
-        ],
-        rotation: [
-          random(-0.3, 0.3),
-          random(-0.3, 0.3),
-          random(-0.3, 0.3)
-        ],
-        scale: random(0.7, 1.3) * scale,
-        speed: random(0.6, 1.4),
-        color: isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY
-      }));
-    }, [count, isChorus, scale]);
+    particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    particleGeometry.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+    particleGeometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
     
-    useFrame((_, delta) => {
-      timeRef.current += delta * (isPlaying ? 0.2 : 0.05);
-      
-      cloudRefs.current.forEach((cloud, i) => {
-        if (cloud) {
-          const data = cloudData[i];
+    // Create material for particles
+    const particleMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        audioIntensity: { value: 1.0 },
+        isChorus: { value: 0.0 },
+      },
+      vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        uniform float time;
+        uniform float audioIntensity;
+        uniform float isChorus;
+        
+        void main() {
+          vColor = color;
           
-          // Gentle rotation
-          cloud.rotation.y += delta * 0.05 * data.speed;
+          // Calculate position with some movement
+          vec3 pos = position;
           
-          // Subtle movement
-          if (isPlaying) {
-            cloud.position.y += Math.sin(timeRef.current * 0.2 * data.speed) * delta * 0.1 * intensity;
-            cloud.position.x += Math.cos(timeRef.current * 0.1 * data.speed) * delta * 0.05 * intensity;
-          }
+          // Add some movement based on time
+          float moveFactor = sin(time * 0.5 + pos.x * 0.1) * cos(time * 0.3 + pos.y * 0.05);
+          pos.x += moveFactor * (0.5 + isChorus * 0.5);
+          pos.y += sin(time * 0.4 + pos.z * 0.1) * (0.5 + isChorus * 0.5);
+          
+          // Apply audio reactivity
+          pos *= 1.0 + (audioIntensity - 1.0) * 0.1;
+          
+          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+          gl_PointSize = size * (40.0 / -mvPosition.z) * (1.0 + (audioIntensity - 1.0) * 0.3);
+          gl_Position = projectionMatrix * mvPosition;
         }
-      });
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        
+        void main() {
+          // Create a circular particle
+          float dist = length(gl_PointCoord - vec2(0.5));
+          if (dist > 0.5) discard;
+          
+          // Smooth edges
+          float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthTest: false
     });
     
-    return (
-      <>
-        {cloudData.map((data, i) => (
-          <group
-            key={i}
-            ref={el => (cloudRefs.current[i] = el)}
-            position={data.position}
-            rotation={data.rotation}
-            scale={data.scale}
-          >
-            <Cloud
-              opacity={0.4}
-              speed={0.1} // Animation speed
-              width={10}
-              depth={3}
-              segments={15}
-              color={data.color}
-            />
-          </group>
-        ))}
-      </>
-    );
-  };
-
-  // Planet system component - creates planetary objects
-  const PlanetSystem = ({ count, intensity, isChorus, isPlaying, scale = 1, transitionProgress }) => {
-    const planetsRef = useRef([]);
-    const timeRef = useRef(0);
+    // Create the particle system
+    const particleSystem = new THREE.Points(particleGeometry, particleMaterial);
+    scene.add(particleSystem);
+    particleSystemRef.current = particleSystem;
     
-    // Generate planets with different properties
-    const planets = useMemo(() => {
-      return Array.from({ length: count }, (_, i) => {
-        // Distribute planets in orbital fashion
-        const angle = (i / count) * Math.PI * 2;
-        const radius = 15 + i * 3;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * 5;
-        const z = Math.sin(angle) * radius - 15;
-        
-        // Alternate between verse and chorus colors
-        const isVerseColor = i % 2 === 0;
-        
-        return {
-          position: [x, y, z],
-          size: random(0.7, 1.3) * scale * (i % 2 === 0 ? 1.5 : 1),
-          color: isVerseColor 
-            ? CONFIG.COLORS.VERSE.PRIMARY 
-            : CONFIG.COLORS.CHORUS.PRIMARY,
-          highlightColor: isVerseColor 
-            ? CONFIG.COLORS.VERSE.SECONDARY 
-            : CONFIG.COLORS.CHORUS.SECONDARY,
-          rotationSpeed: random(0.2, 0.5),
-          orbitSpeed: random(0.05, 0.15),
-          hasRings: i % 3 === 0,
-          hasAtmosphere: i % 2 === 1
-        };
-      });
-    }, [count, scale]);
+    // Add some ambient lighting
+    const ambientLight = new THREE.AmbientLight(0x333333);
+    scene.add(ambientLight);
     
-    useFrame((_, delta) => {
-      timeRef.current += delta * (isPlaying ? 0.3 : 0.1);
+    // Add a directional light for some shadow/highlight
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 5, 5);
+    scene.add(directionalLight);
+    
+    // Create chorus-specific 3D elements (shapes that appear during chorus)
+    const createChorus3DElements = () => {
+      // Clear existing chorus elements
+      if (chorus3DElementsRef.current.length > 0) {
+        chorus3DElementsRef.current.forEach(obj => {
+          scene.remove(obj);
+        });
+        chorus3DElementsRef.current = [];
+      }
       
-      planetsRef.current.forEach((planet, i) => {
-        if (planet) {
-          const data = planets[i];
+      // Create a ring of triangular prisms that will appear during chorus
+      const ringCount = mobileMode ? 8 : 12;
+      const radius = 15;
+      
+      for (let i = 0; i < ringCount; i++) {
+        const angle = (i / ringCount) * Math.PI * 2;
+        
+        // Create a custom shape for each element
+        const geometry = new THREE.CylinderGeometry(0.5, 0.5, 5, 3, 1);
+        
+        // Use pink/red material for chorus objects
+        const material = new THREE.MeshPhongMaterial({
+          color: 0xe34a7b,
+          emissive: 0x6d1d33,
+          specular: 0xffffff,
+          shininess: 100,
+          transparent: true,
+          opacity: 0
+        });
+        
+        const mesh = new THREE.Mesh(geometry, material);
+        
+        // Position around a circle
+        mesh.position.x = Math.cos(angle) * radius;
+        mesh.position.y = Math.sin(angle) * radius;
+        mesh.position.z = -5;
+        
+        // Rotate to point outward
+        mesh.rotation.z = angle + Math.PI / 2;
+        mesh.rotation.y = Math.PI / 2;
+        
+        // Add some random rotation to make it less uniform
+        mesh.rotation.x = Math.random() * Math.PI;
+        
+        scene.add(mesh);
+        chorus3DElementsRef.current.push(mesh);
+      }
+      
+      // Add a central ring that will pulse with the music
+      const ringGeometry = new THREE.TorusGeometry(10, 0.5, 16, 50);
+      const ringMaterial = new THREE.MeshPhongMaterial({
+        color: 0xe34a7b,
+        emissive: 0x6d1d33,
+        specular: 0xffffff,
+        shininess: 100,
+        transparent: true,
+        opacity: 0
+      });
+      
+      const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+      ring.rotation.x = Math.PI / 2;
+      scene.add(ring);
+      chorus3DElementsRef.current.push(ring);
+    };
+    
+    createChorus3DElements();
+    
+    // Three.js animation loop
+    const animate = () => {
+      if (!isMountedRef.current || !threeSceneRef.current) {
+        cancelAnimationFrame(threeAnimationRef.current);
+        return;
+      }
+      
+      threeTimeRef.current += 0.01;
+      
+      // Update audio intensity in the shader
+      if (particleSystemRef.current) {
+        particleSystemRef.current.material.uniforms.time.value = threeTimeRef.current;
+        particleSystemRef.current.material.uniforms.audioIntensity.value = currentAudioIntensityRef.current;
+        particleSystemRef.current.material.uniforms.isChorus.value = isChorus ? 1.0 : 0.0;
+      }
+      
+      // Update chorus 3D elements
+      if (chorus3DElementsRef.current.length > 0) {
+        const targetOpacity = isChorus ? 0.8 : 0;
+        const opacityStep = 0.03; // Controls transition speed
+        
+        chorus3DElementsRef.current.forEach((obj, index) => {
+          // Get current opacity
+          const currentOpacity = obj.material.opacity;
           
-          // Update planet rotation
-          planet.rotation.y += delta * data.rotationSpeed * (isPlaying ? intensity : 0.5);
-          
-          // Update orbit position - smoother with audio reactivity
-          if (isPlaying) {
-            // Get orbit center and calculate new position
-            const angle = timeRef.current * data.orbitSpeed;
-            const x = data.position[0] + Math.sin(angle) * 2 * intensity;
-            const y = data.position[1] + Math.sin(angle * 2) * 1 * intensity;
-            const z = data.position[2];
-            
-            // Apply with smoothing
-            planet.position.x = lerp(planet.position.x, x, delta * 2);
-            planet.position.y = lerp(planet.position.y, y, delta * 2);
-            planet.position.z = z;
-            
-            // Apply scale changes during transition
-            const targetScale = data.size * (isChorus ? 1.2 : 1);
-            planet.scale.setScalar(lerp(planet.scale.x, targetScale, delta * 2));
+          // Smoothly transition opacity
+          if (currentOpacity < targetOpacity) {
+            obj.material.opacity = Math.min(currentOpacity + opacityStep, targetOpacity);
+          } else if (currentOpacity > targetOpacity) {
+            obj.material.opacity = Math.max(currentOpacity - opacityStep, targetOpacity);
           }
           
-          // Special effects for planet children
-          planet.children.forEach(child => {
-            // Find atmosphere and rings by checking geometry
-            if (child.geometry instanceof THREE.SphereGeometry && child !== planet.children[0]) {
-              // This is an atmosphere
-              child.material.opacity = 0.2 + 0.1 * Math.sin(timeRef.current * 2) * intensity;
-            } else if (child.geometry instanceof THREE.RingGeometry) {
-              // This is a ring
-              child.rotation.x = Math.PI / 4 + Math.sin(timeRef.current * 0.5) * 0.1 * intensity;
+          // For visible chorus elements, add some animation
+          if (obj.material.opacity > 0.1) {
+            // If it's the last element (the ring)
+            if (index === chorus3DElementsRef.current.length - 1) {
+              // Pulse the ring with audio intensity
+              const scaleFactor = 1 + (currentAudioIntensityRef.current - 1) * 0.2;
+              obj.scale.set(scaleFactor, scaleFactor, scaleFactor);
+              
+              // Rotate the ring
+              obj.rotation.z += 0.005;
+            } else {
+              // Rotate the prisms
+              obj.rotation.y += 0.01;
+              
+              // Make them move slightly with audio
+              const originalDist = 15; // Original radius
+              const angle = (index / (chorus3DElementsRef.current.length - 1)) * Math.PI * 2;
+              
+              // Audio-reactive distance
+              const distFactor = 1 + (currentAudioIntensityRef.current - 1) * 0.15;
+              const currentDist = originalDist * distFactor;
+              
+              obj.position.x = Math.cos(angle) * currentDist;
+              obj.position.y = Math.sin(angle) * currentDist;
+              
+              // Pulse with beat
+              const beatPulse = 1 + Math.sin(threeTimeRef.current * 5) * 0.1 * (currentAudioIntensityRef.current - 1);
+              obj.scale.set(beatPulse, beatPulse, beatPulse);
             }
-          });
-        }
-      });
-    });
-    
-    return (
-      <>
-        {planets.map((data, i) => {
-          // Blend colors based on transition progress
-          const colorObj = {
-            main: data.color,
-            highlight: data.highlightColor
-          };
-          
-          // For chorus transition, interpolate colors
-          if (isChorus) {
-            colorObj.main = new THREE.Color(data.color).lerp(
-              new THREE.Color(CONFIG.COLORS.CHORUS.PRIMARY),
-              transitionProgress
-            ).getStyle();
-            
-            colorObj.highlight = new THREE.Color(data.highlightColor).lerp(
-              new THREE.Color(CONFIG.COLORS.CHORUS.SECONDARY),
-              transitionProgress
-            ).getStyle();
-          } else {
-            colorObj.main = new THREE.Color(data.color).lerp(
-              new THREE.Color(CONFIG.COLORS.VERSE.PRIMARY),
-              1 - transitionProgress
-            ).getStyle();
-            
-            colorObj.highlight = new THREE.Color(data.highlightColor).lerp(
-              new THREE.Color(CONFIG.COLORS.VERSE.SECONDARY),
-              1 - transitionProgress
-            ).getStyle();
           }
-          
-          return (
-            <Planet
-              key={i}
-              ref={el => (planetsRef.current[i] = el)}
-              position={data.position}
-              size={data.size}
-              color={colorObj.main}
-              highlightColor={colorObj.highlight}
-              intensity={intensity}
-              isPlaying={isPlaying}
-              hasRings={data.hasRings}
-              hasAtmosphere={data.hasAtmosphere}
-            />
-          );
-        })}
-      </>
-    );
-  };
-
-  // Individual planet component
-  const Planet = React.forwardRef(
-    ({ position, size, color, highlightColor, intensity, isPlaying, hasRings, hasAtmosphere }, ref) => {
-      const timeRef = useRef(0);
-      
-      // Setup planet hierarchy
-      useEffect(() => {
-        if (ref.current) {
-          // Apply initial positions and scales
-          ref.current.position.set(...position);
-          ref.current.scale.set(size, size, size);
-        }
-      }, [position, size, ref]);
-      
-      return (
-        <group ref={ref} position={position}>
-          {/* Planet core */}
-          <mesh castShadow>
-            <sphereGeometry args={[1, 32, 32]} />
-            <meshStandardMaterial 
-              color={color} 
-              metalness={0.2}
-              roughness={0.7}
-            />
-          </mesh>
-          
-          {/* Optional atmosphere */}
-          {hasAtmosphere && (
-            <mesh>
-              <sphereGeometry args={[1.2, 32, 32]} />
-              <meshBasicMaterial 
-                color={highlightColor} 
-                transparent 
-                opacity={0.2}
-                side={THREE.BackSide}
-              />
-            </mesh>
-          )}
-          
-          {/* Optional rings */}
-          {hasRings && (
-            <mesh rotation={[Math.PI / 4, 0, 0]}>
-              <ringGeometry args={[1.4, 2.2, 64]} />
-              <meshBasicMaterial 
-                color={highlightColor} 
-                transparent 
-                opacity={0.3} 
-                side={THREE.DoubleSide}
-              />
-            </mesh>
-          )}
-          
-          {/* Planet light source */}
-          <pointLight 
-            color={highlightColor} 
-            intensity={isPlaying ? 0.5 * intensity : 0.2} 
-            distance={10} 
-          />
-        </group>
-      );
-    }
-  );
-
-  // Space particles component
-  const SpaceParticles = ({ count, size, intensity, isChorus, isPlaying }) => {
-    const particlesRef = useRef();
-    const timeRef = useRef(0);
-    
-    // Generate particle positions
-    const particles = useMemo(() => {
-      return new Array(count).fill(0).map(() => {
-        const r = 20 + Math.random() * 20;
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        
-        // Convert spherical to Cartesian coordinates for better distribution
-        const x = r * Math.sin(phi) * Math.cos(theta);
-        const y = r * Math.sin(phi) * Math.sin(theta);
-        const z = r * Math.cos(phi);
-        
-        return {
-          position: new THREE.Vector3(x, y, z),
-          originalPosition: new THREE.Vector3(x, y, z),
-          speed: Math.random() * 0.5 + 0.5,
-          phase: Math.random() * Math.PI * 2
-        };
-      });
-    }, [count]);
-    
-    // Create positions array for buffer geometry
-    const positions = useMemo(() => {
-      const positions = new Float32Array(count * 3);
-      
-      for (let i = 0; i < count; i++) {
-        positions[i * 3] = particles[i].position.x;
-        positions[i * 3 + 1] = particles[i].position.y;
-        positions[i * 3 + 2] = particles[i].position.z;
+        });
       }
       
-      return positions;
-    }, [particles, count]);
-    
-    useFrame((_, delta) => {
-      timeRef.current += delta * (isPlaying ? 0.5 : 0.1);
-      
-      if (particlesRef.current && particlesRef.current.geometry.attributes.position) {
-        const positionArray = particlesRef.current.geometry.attributes.position.array;
+      // Update particle colors based on isChorus (transition from purple to pink)
+      if (particleSystemRef.current && particleSystemRef.current.geometry.attributes.color) {
+        const colorAttribute = particleSystemRef.current.geometry.attributes.color;
+        const positionAttribute = particleSystemRef.current.geometry.attributes.position;
+        const particleCount = positionAttribute.count;
         
-        // Update particle positions
-        for (let i = 0; i < count; i++) {
-          const particle = particles[i];
+        for (let i = 0; i < particleCount; i++) {
           const i3 = i * 3;
+          const x = positionAttribute.array[i3];
+          const y = positionAttribute.array[i3 + 1];
+          const z = positionAttribute.array[i3 + 2];
           
-          if (isPlaying) {
-            // Oscillate particles around their original positions
-            positionArray[i3] = particle.originalPosition.x + 
-              Math.sin(timeRef.current * 0.1 * particle.speed + particle.phase) * intensity;
-            positionArray[i3 + 1] = particle.originalPosition.y + 
-              Math.cos(timeRef.current * 0.15 * particle.speed + particle.phase) * intensity;
-            positionArray[i3 + 2] = particle.originalPosition.z + 
-              Math.sin(timeRef.current * 0.2 * particle.speed + particle.phase * 2) * intensity;
+          // Create different colors based on position and isChorus
+          let r, g, b;
+          
+          if (isChorus) {
+            // During chorus, transition to pinks and reds
+            r = 0.85 + Math.sin(x * 0.1 + threeTimeRef.current) * 0.15;
+            g = 0.3 + Math.sin(y * 0.1 + threeTimeRef.current) * 0.1;
+            b = 0.4 + Math.cos(z * 0.1 + threeTimeRef.current) * 0.1;
+          } else {
+            // During verses, use purples and blues
+            r = 0.4 + Math.sin(x * 0.1 + threeTimeRef.current) * 0.1;
+            g = 0.3 + Math.sin(y * 0.1 + threeTimeRef.current) * 0.1;
+            b = 0.8 + Math.cos(z * 0.1 + threeTimeRef.current) * 0.2;
+          }
+          
+          // Smoothly transition between verse and chorus colors
+          colorAttribute.array[i3] = colorAttribute.array[i3] * 0.95 + r * 0.05;
+          colorAttribute.array[i3 + 1] = colorAttribute.array[i3 + 1] * 0.95 + g * 0.05;
+          colorAttribute.array[i3 + 2] = colorAttribute.array[i3 + 2] * 0.95 + b * 0.05;
+          
+          // Boost brightness based on audio intensity for a reactive effect
+          if (isPlaying && currentAudioIntensityRef.current > 1.2) {
+            const boost = (currentAudioIntensityRef.current - 1) * 0.2;
+            colorAttribute.array[i3] = Math.min(1, colorAttribute.array[i3] + boost);
+            colorAttribute.array[i3 + 1] = Math.min(1, colorAttribute.array[i3 + 1] + boost * 0.5);
+            colorAttribute.array[i3 + 2] = Math.min(1, colorAttribute.array[i3 + 2] + boost * 0.7);
           }
         }
         
-        particlesRef.current.geometry.attributes.position.needsUpdate = true;
-        
-        // Update particle size with audio
-        particlesRef.current.material.size = size * (1 + 0.5 * (intensity - 1));
-      }
-    });
-    
-    return (
-      <points ref={particlesRef}>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={count}
-            array={positions}
-            itemSize={3}
-          />
-        </bufferGeometry>
-        <pointsMaterial
-          size={size}
-          sizeAttenuation={true}
-          transparent
-          opacity={0.6}
-          color={isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY}
-          fog={true}
-        />
-      </points>
-    );
-  };
-
-  // Cosmic dust particles
-  const CosmicDust = ({ count, size, intensity, isChorus, isPlaying }) => {
-    const particlesRef = useRef();
-    
-    // Generate random positions
-    const positions = useMemo(() => {
-      const tempPositions = new Float32Array(count * 3);
-      const tempSizes = new Float32Array(count);
-      
-      for (let i = 0; i < count; i++) {
-        const r = 40 + Math.random() * 30;
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos(2 * Math.random() - 1);
-        
-        tempPositions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-        tempPositions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-        tempPositions[i * 3 + 2] = r * Math.cos(phi) - 20; // Push back
-        
-        tempSizes[i] = Math.random() * 0.5 + 0.5;
+        colorAttribute.needsUpdate = true;
       }
       
-      return { positions: tempPositions, sizes: tempSizes };
-    }, [count]);
-    
-    useFrame((_, delta) => {
-      if (particlesRef.current && isPlaying) {
-        // Rotate the dust cloud
-        particlesRef.current.rotation.y += delta * 0.01 * intensity;
+      // Rotate the camera slightly based on mouse position for parallax effect
+      if (isMoving && threeCameraRef.current) {
+        const targetX = (mousePosition.x / window.innerWidth - 0.5) * 10;
+        const targetY = (mousePosition.y / window.innerHeight - 0.5) * -10;
         
-        // Update size based on audio
-        particlesRef.current.material.size = size * (1 + 0.5 * (intensity - 1));
+        // Smooth camera movement
+        threeCameraRef.current.position.x += (targetX - threeCameraRef.current.position.x) * 0.05;
+        threeCameraRef.current.position.y += (targetY - threeCameraRef.current.position.y) * 0.05;
+        threeCameraRef.current.lookAt(0, 0, 0);
       }
-    });
-    
-    return (
-      <points ref={particlesRef}>
-        <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            count={count}
-            array={positions.positions}
-            itemSize={3}
-          />
-          <bufferAttribute
-            attach="attributes-size"
-            count={count}
-            array={positions.sizes}
-            itemSize={1}
-          />
-        </bufferGeometry>
-        <pointsMaterial
-          size={size}
-          sizeAttenuation={true}
-          transparent
-          opacity={0.4}
-          color={isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY}
-          fog={true}
-        />
-      </points>
-    );
-  };
-
-  // Shooting stars with trails
-  const ShootingStars = ({ count, intensity, isChorus }) => {
-    const starsRef = useRef([]);
-    const timeRef = useRef(0);
-    
-    // Generate shooting star paths
-    const stars = useMemo(() => {
-      return new Array(count).fill(0).map(() => {
-        const startX = random(-40, 40);
-        const startY = random(-10, 30);
-        const startZ = random(-50, -10);
-        
-        const endX = startX + random(-30, 30);
-        const endY = startY - random(20, 40);
-        const endZ = startZ + random(-20, 20);
-        
-        return {
-          start: new THREE.Vector3(startX, startY, startZ),
-          end: new THREE.Vector3(endX, endY, endZ),
-          duration: random(2, 6),
-          delay: random(0, 15),
-          size: random(0.05, 0.15),
-          speed: random(0.8, 1.5),
-          progress: 0,
-          active: false
-        };
-      });
-    }, [count]);
-    
-    useFrame((_, delta) => {
-      timeRef.current += delta;
       
-      // Update star positions and progress
-      stars.forEach((star, i) => {
-        if (timeRef.current > star.delay) {
-          if (!star.active) {
-            star.active = true;
-            star.progress = 0;
-          }
-          
-          // Update progress
-          star.progress += delta * star.speed * intensity;
-          
-          // Reset if complete
-          if (star.progress >= star.duration) {
-            star.progress = 0;
-            star.delay = timeRef.current + random(1, 8);
-            
-            // Randomize new paths
-            const startX = random(-40, 40);
-            const startY = random(-10, 30);
-            const startZ = random(-50, -10);
-            
-            const endX = startX + random(-30, 30);
-            const endY = startY - random(20, 40);
-            const endZ = startZ + random(-20, 20);
-            
-            star.start = new THREE.Vector3(startX, startY, startZ);
-            star.end = new THREE.Vector3(endX, endY, endZ);
-          }
-          
-          // Calculate current position with easing
-          const t = star.progress / star.duration;
-          const eased = 1 - Math.pow(1 - t, 3); // Cubic ease-out
-          
-          if (starsRef.current[i]) {
-            const pos = new THREE.Vector3().lerpVectors(star.start, star.end, eased);
-            starsRef.current[i].position.copy(pos);
-          }
-        }
-      });
-    });
-    
-    return (
-      <group>
-        {stars.map((star, i) => (
-          <Trail
-            key={i}
-            width={0.6}
-            length={16}
-            color={new THREE.Color(isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY)}
-            attenuation={(t) => t * t}
-            decay={2}
-          >
-            <mesh
-              ref={(el) => (starsRef.current[i] = el)}
-              position={star.start}
-            >
-              <sphereGeometry args={[star.size, 8, 8]} />
-              <meshBasicMaterial color={"#ffffff"} />
-            </mesh>
-          </Trail>
-        ))}
-      </group>
-    );
-  };
-
-  // Comet effect with trail
-  const Comet = ({ intensity, isChorus, count = 1 }) => {
-    const cometsRef = useRef([]);
-    const timeRef = useRef(0);
-    
-    // Generate comet paths
-    const comets = useMemo(() => {
-      return new Array(count).fill(0).map((_, index) => {
-        // Create a curved path for each comet
-        const points = [];
-        const radius = 12 + index * 4;
-        const turns = 2 + index * 0.5;
-        const pointCount = 100;
-        const heightVariation = index * 2;
-        
-        for (let i = 0; i < pointCount; i++) {
-          const t = i / pointCount;
-          const angle = t * Math.PI * 2 * turns;
-          const x = radius * Math.cos(angle);
-          const y = (radius * Math.sin(angle) * 0.5) + (Math.sin(angle * 3) * heightVariation);
-          const z = -20 + t * 40;
-          points.push(new THREE.Vector3(x, y, z));
-        }
-        
-        return {
-          path: new THREE.CatmullRomCurve3(points),
-          progress: Math.random(),
-          speed: 0.05 + index * 0.01
-        };
-      });
-    }, [count]);
-
-    useFrame((_, delta) => {
-      timeRef.current += delta;
+      // Render the scene
+      threeRendererRef.current.render(threeSceneRef.current, threeCameraRef.current);
       
-      comets.forEach((comet, i) => {
-        if (cometsRef.current[i]) {
-          // Update comet progress along path
-          comet.progress += delta * comet.speed * intensity;
-          if (comet.progress > 1) comet.progress = 0;
-          
-          // Get current position along the path
-          const point = comet.path.getPoint(comet.progress);
-          cometsRef.current[i].position.copy(point);
-          
-          // Orient comet along the path for realistic movement
-          if (comet.progress < 0.99) {
-            const tangent = comet.path.getTangent(comet.progress);
-            cometsRef.current[i].lookAt(
-              point.x + tangent.x,
-              point.y + tangent.y,
-              point.z + tangent.z
-            );
+      threeAnimationRef.current = requestAnimationFrame(animate);
+    };
+    
+    threeAnimationRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (threeAnimationRef.current) {
+        cancelAnimationFrame(threeAnimationRef.current);
+      }
+    };
+  }, [isPlaying, mobileMode]);
+
+  // Initialize 2D canvas and stars
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { alpha: true });
+    canvasContextRef.current = ctx;
+
+    // Set canvas size to window size
+    const resizeCanvas = () => {
+      if (!canvas || !isMountedRef.current) return;
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+
+    resizeCanvas();
+
+    // Initialize stars - density based on viewport size
+    const initStars = () => {
+      if (!canvas || !isMountedRef.current) return;
+      const starDensity = mobileMode ? 0.00012 : 0.00018; // Increased density
+      const starCount = Math.floor(canvas.width * canvas.height * starDensity);
+
+      const stars = [];
+      for (let i = 0; i < starCount; i++) {
+        stars.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          z: Math.random() * 1000,
+          size: Math.random() * 2 + 0.5, // Slightly larger stars
+          speed: Math.random() * 0.05 + 0.01, // Faster movement
+          brightness: Math.random() * 0.7 + 0.3,
+          pulse: Math.random() * 0.02 + 0.01,
+          pulseDelta: Math.random() * 0.005 + 0.002,
+          hue: Math.random() * 60 + backgroundHueRef.current, // Based on current background hue
+          opacity: Math.random() * 0.5 + 0.5,
+          twinkle: Math.random() > 0.5, // More stars twinkle
+          twinkleSpeed: Math.random() * 0.1 + 0.05,
+        });
+      }
+
+      starsRef.current = stars;
+    };
+
+    // Initialize particles - more for visual impact
+    const initParticles = () => {
+      if (!canvas || !isMountedRef.current) return;
+      const particleDensity = mobileMode ? 0.00003 : 0.00005; // Increased density
+      const particleCount = Math.floor(canvas.width * canvas.height * particleDensity);
+
+      const particles = [];
+      for (let i = 0; i < particleCount; i++) {
+        particles.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          z: Math.random() * 1000,
+          size: Math.random() * 4 + 1, // Larger particles
+          speed: Math.random() * 0.3 + 0.1, // Faster movement
+          directionX: Math.random() * 2 - 1,
+          directionY: Math.random() * 2 - 1,
+          hue: Math.random() * 60 + backgroundHueRef.current,
+          opacity: Math.random() * 0.3 + 0.1, // More visible
+          decay: Math.random() * 0.01 + 0.005,
+        });
+      }
+
+      particlesRef.current = particles;
+    };
+
+    // Set up canvas and initialize elements
+    const resizeHandler = () => {
+      resizeCanvas();
+      initStars();
+      initParticles();
+    };
+
+    window.addEventListener("resize", resizeHandler);
+
+    initStars();
+    initParticles();
+
+    return () => {
+      isMountedRef.current = false;
+      window.removeEventListener("resize", resizeHandler);
+
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    };
+  }, [mobileMode]);
+
+  // Update background hue and glow based on chorus
+  useEffect(() => {
+    // Detect transition to/from chorus
+    if (isChorus !== chorusTransitionRef.current) {
+      chorusTransitionRef.current = isChorus;
+    }
+    
+    if (isChorus) {
+      // Shift towards pink/red for chorus
+      backgroundHueRef.current = 320;
+      glowIntensityRef.current.target = 0.8;
+    } else {
+      // Shift back towards purple for verses
+      backgroundHueRef.current = 280;
+      glowIntensityRef.current.target = 0.5;
+    }
+  }, [isChorus]);
+
+  // Update star field opacity based on playing state
+  useEffect(() => {
+    // Brighter stars when playing
+    starFieldOpacityRef.current = isPlaying ? 1 : 0.7;
+  }, [isPlaying]);
+
+  // Process audio levels to get current intensity
+  useEffect(() => {
+    if (!isPlaying || !audioLevel || audioLevel.length === 0) {
+      currentAudioIntensityRef.current = 1;
+      return;
+    }
+
+    // Calculate average audio intensity focusing on bass frequencies
+    const sampleSize = Math.min(20, audioLevel.length);
+    let sum = 0;
+    
+    for (let i = 0; i < sampleSize; i++) {
+      sum += audioLevel[i] || 0;
+    }
+    
+    const avgLevel = sum / (sampleSize * 255); // Normalize to 0-1
+    const reactiveIntensity = 1 + avgLevel * 2; // Scale for more dramatic effect
+    
+    // Smooth transitions for audio intensity
+    currentAudioIntensityRef.current = currentAudioIntensityRef.current * 0.8 + reactiveIntensity * 0.2;
+  }, [isPlaying, audioLevel]);
+
+  // Main 2D animation loop
+  useEffect(() => {
+    if (!canvasRef.current || !canvasContextRef.current) return;
+
+    const ctx = canvasContextRef.current;
+
+    // Animate function
+    const animate = (timestamp) => {
+      if (!isMountedRef.current || !canvasRef.current) {
+        if (requestRef.current) {
+          cancelAnimationFrame(requestRef.current);
+          requestRef.current = null;
+        }
+        return;
+      }
+
+      // Limit frame rate for performance
+      if (timestamp - lastRenderTimeRef.current < 33) {
+        // ~30fps
+        requestRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
+      lastRenderTimeRef.current = timestamp;
+
+      // Clear canvas with slight transparency for trailing effect
+      ctx.fillStyle = "rgba(10, 10, 20, 0.2)";
+      ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+      // Update pulse effect
+      pulseEffectRef.current = isPlaying
+        ? (pulseEffectRef.current + 0.01) % (Math.PI * 2)
+        : (pulseEffectRef.current + 0.005) % (Math.PI * 2);
+
+      const pulseValue = Math.sin(pulseEffectRef.current) * 0.5 + 0.5; // 0 to 1
+
+      // Smooth glow intensity transition
+      glowIntensityRef.current.current += (glowIntensityRef.current.target - glowIntensityRef.current.current) * 0.05;
+
+      // Get the current audio reactivity
+      const audioReactivity = currentAudioIntensityRef.current;
+
+      // Draw stars with 3D perspective effect
+      const maxStarsToRender = mobileMode ? 300 : 800; // Increased star count
+      const starsToRender = Math.min(starsRef.current.length, maxStarsToRender);
+
+      for (let i = 0; i < starsToRender; i++) {
+        const star = starsRef.current[i];
+
+        // Update brightness for twinkling effect
+        star.brightness += star.pulseDelta;
+
+        // Reverse direction at boundaries
+        if (star.brightness > 1 || star.brightness < 0.3) {
+          star.pulseDelta = -star.pulseDelta;
+        }
+
+        // Bonus twinkle effect for some stars
+        let twinkleFactor = 1;
+        if (star.twinkle) {
+          twinkleFactor = 0.7 + Math.sin(timestamp * star.twinkleSpeed) * 0.3;
+        }
+
+        // Audio influence
+        let audioInfluence = 0;
+        if (isPlaying) {
+          audioInfluence = (audioReactivity - 1) * 0.4;
+        }
+
+        // Mouse influence (subtle)
+        let mouseInfluence = 0;
+        if (isMoving) {
+          const dx = mousePosition.x - star.x;
+          const dy = mousePosition.y - star.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          const mouseRange = 150;
+
+          if (distance < mouseRange) {
+            // Enhanced effect
+            mouseInfluence = (1 - distance / mouseRange) * 0.1;
           }
         }
-      });
-    });
 
-    return (
-      <group>
-        {comets.map((comet, i) => (
-          <Trail
-            key={i}
-            width={1.5}
-            length={20}
-            color={new THREE.Color(isChorus 
-              ? CONFIG.COLORS.CHORUS.PRIMARY 
-              : CONFIG.COLORS.VERSE.PRIMARY
-            )}
-            attenuation={(t) => t * t}
-            decay={3}
-          >
-            <mesh ref={(el) => (cometsRef.current[i] = el)}>
-              <sphereGeometry args={[0.3, 16, 16]} />
-              <meshBasicMaterial color={isChorus 
-                ? CONFIG.COLORS.CHORUS.SECONDARY 
-                : CONFIG.COLORS.VERSE.SECONDARY
-              } />
-            </mesh>
-          </Trail>
-        ))}
-      </group>
-    );
-  };
+        // Combine all factors
+        const finalBrightness = star.brightness * twinkleFactor + audioInfluence + mouseInfluence;
+        const finalSize = star.size * (1 + audioInfluence * 1.5); // Enhanced size change
 
-  // --- Main Component Render ---
+        // Apply star field opacity
+        const starOpacity = finalBrightness * star.opacity * starFieldOpacityRef.current;
+
+        // Draw star with 3D perspective effect
+        // Calculate size based on z (depth)
+        const perspective = 300;
+        const scale = perspective / (perspective + star.z);
+        const size = finalSize * scale;
+        const x = (star.x - canvasRef.current.width / 2) * scale + canvasRef.current.width / 2;
+        const y = (star.y - canvasRef.current.height / 2) * scale + canvasRef.current.height / 2;
+
+        // Color based on isChorus
+        const hue = isChorus ? 
+          (star.hue - 40 + pulseValue * 20) : // More red during chorus
+          (star.hue + pulseValue * 10); // More purple during verses
+
+        ctx.fillStyle = `hsla(${hue}, 80%, 75%, ${starOpacity})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Add glow effect for brighter stars
+        if (finalBrightness > 0.7) {
+          ctx.shadowBlur = size * 3;
+          ctx.shadowColor = `hsla(${hue}, 80%, 75%, 0.6)`;
+        } else {
+          ctx.shadowBlur = 0;
+        }
+
+        // Update z position for 3D movement
+        star.z -= star.speed * 10 * (isPlaying ? audioReactivity : 0.5);
+
+        // If the star goes behind the camera, reset it to the back
+        if (star.z <= 0) {
+          star.z = 1000;
+          star.x = Math.random() * canvasRef.current.width;
+          star.y = Math.random() * canvasRef.current.height;
+          star.hue = Math.random() * 60 + backgroundHueRef.current;
+        }
+      }
+
+      // Draw particles - increased for visual impact
+      const maxParticlesToRender = mobileMode ? 30 : 60;
+      const particlesToRender = Math.min(particlesRef.current.length, maxParticlesToRender);
+
+      for (let i = 0; i < particlesToRender; i++) {
+        const particle = particlesRef.current[i];
+
+        // Audio reactivity for particles
+        let audioReactivityFactor = 1;
+        if (isPlaying) {
+          audioReactivityFactor = audioReactivity;
+        }
+
+        // Update position with perspective
+        const perspective = 300;
+        const scale = perspective / (perspective + particle.z);
+        const x = (particle.x - canvasRef.current.width / 2) * scale + canvasRef.current.width / 2;
+        const y = (particle.y - canvasRef.current.height / 2) * scale + canvasRef.current.height / 2;
+        const size = particle.size * scale;
+
+        // Update z-position
+        particle.z -= particle.speed * 5 * audioReactivityFactor;
+        
+        // Also update x/y position
+        particle.x += particle.directionX * particle.speed * audioReactivityFactor;
+        particle.y += particle.directionY * particle.speed * audioReactivityFactor;
+
+        // Bounce off edges
+        if (particle.x < 0 || particle.x > canvasRef.current.width) {
+          particle.directionX *= -1;
+        }
+
+        if (particle.y < 0 || particle.y > canvasRef.current.height) {
+          particle.directionY *= -1;
+        }
+
+        // Draw particle
+        ctx.beginPath();
+        const hue = isChorus ? 340 : 280; // Pink for chorus, purple for verses
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, size * 2);
+        gradient.addColorStop(0, `hsla(${hue}, 80%, 75%, ${particle.opacity})`);
+        gradient.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.arc(x, y, size * 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Slowly fade out particles
+        particle.opacity -= particle.decay * (isChorus ? 0.5 : 1); // Slower decay during chorus
+
+        // Reset particles that have faded out or gone behind camera
+        if (particle.opacity <= 0 || particle.z <= 0) {
+          particle.x = Math.random() * canvasRef.current.width;
+          particle.y = Math.random() * canvasRef.current.height;
+          particle.z = 1000;
+          particle.opacity = Math.random() * 0.3 + 0.1;
+          particle.hue = Math.random() * 60 + backgroundHueRef.current;
+        }
+      }
+
+      // Special effect for chorus transition
+      if (isChorus !== chorusTransitionRef.current) {
+        // Create a flash effect when transitioning to chorus
+        ctx.fillStyle = isChorus ? 
+          "rgba(227, 74, 123, 0.3)" : // Pink flash for chorus start
+          "rgba(123, 58, 237, 0.3)";  // Purple flash for chorus end
+        ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
+
+      // Draw aurora borealis effect during chorus
+      if (isChorus) {
+        drawAuroraBorealis(ctx, timestamp, audioReactivity);
+      }
+
+      requestRef.current = requestAnimationFrame(animate);
+    };
+
+    // Draw aurora borealis effect
+    const drawAuroraBorealis = (ctx, timestamp, audioReactivity) => {
+      if (!canvasRef.current || !isMountedRef.current) return;
+
+      const width = canvasRef.current.width;
+      const height = canvasRef.current.height;
+
+      // Create multiple wave-like shapes
+      const waveCount = 3;
+      const baseY = height * 0.6;
+
+      for (let w = 0; w < waveCount; w++) {
+        // Different hues for each wave
+        const hue = backgroundHueRef.current - 50 + w * 30;
+
+        ctx.beginPath();
+
+        // Start from left edge
+        ctx.moveTo(0, baseY + Math.sin(timestamp * 0.001 + w) * 50);
+
+        // Create wave points
+        const pointCount = 10;
+        for (let i = 0; i <= pointCount; i++) {
+          const x = (width / pointCount) * i;
+
+          // Calculate wave height with multiple sine waves
+          const timeOffset = timestamp * 0.001;
+          const wave1 = Math.sin(timeOffset + i * 0.2 + w) * 50;
+          const wave2 = Math.sin(timeOffset * 1.5 + i * 0.3) * 30;
+          const wave3 = Math.sin(timeOffset * 0.7 - i * 0.4 + w * 0.5) * 20;
+
+          // Combine waves and apply audio reactivity
+          const y = baseY + (wave1 + wave2 + wave3) * audioReactivity * 1.5; // Enhanced effect
+
+          // Use quadratic curves for smoother lines
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            const prevX = (width / pointCount) * (i - 1);
+            const cpX = (x + prevX) / 2;
+            ctx.quadraticCurveTo(cpX, y, x, y);
+          }
+        }
+
+        // Complete the shape by going to bottom and back to start
+        ctx.lineTo(width, height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+
+        // Create gradient fill with enhanced opacity
+        const gradient = ctx.createLinearGradient(0, baseY - 100, 0, baseY + 100);
+        gradient.addColorStop(0, `hsla(${hue}, 80%, 70%, 0)`);
+        gradient.addColorStop(
+          0.5,
+          `hsla(${hue}, 80%, 70%, ${0.15 * audioReactivity * glowIntensityRef.current.current})`,
+        );
+        gradient.addColorStop(1, `hsla(${hue}, 80%, 50%, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+    };
+
+    // Start animation
+    requestRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      isMountedRef.current = false;
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    };
+  }, [isPlaying, mousePosition, isMoving, isChorus, audioLevel, mobileMode]);
+
+  // Creating an array of floating orbs as a useMemo to prevent unnecessary re-renders
+  const floatingOrbs = useMemo(() => {
+    const orbCount = mobileMode ? 5 : 8;
+    return Array.from({ length: orbCount }).map((_, i) => ({
+      id: i,
+      size: 10 + Math.random() * 40,
+      x: Math.random() * 100,
+      y: Math.random() * 100,
+      duration: 10 + Math.random() * 20,
+      delay: Math.random() * 5,
+      opacity: 0.1 + Math.random() * 0.2,
+    }));
+  }, [mobileMode]);
+
   return (
     <>
-      {/* Deep space gradient background */}
-      <div 
-        className="fixed inset-0 z-[-10]" 
+      {/* Base gradient background - enhanced colors */}
+      <div className="fixed inset-0 bg-gradient-to-b from-[#0f0a20] via-[#120824] to-[#0a0a18] z-[-10]"></div>
+
+      {/* ThreeJS Canvas for 3D particles */}
+      <canvas 
+        ref={threeCanvasRef} 
+        className="fixed inset-0 z-[-9]" 
+        style={{ 
+          opacity: isPlaying ? 1 : 0.7, 
+          transition: "opacity 1s ease"
+        }} 
+      />
+
+      {/* 2D Canvas for stars with 3D perspective */}
+      <canvas ref={canvasRef} className="fixed inset-0 z-[-8]" style={{ filter: "blur(0.5px)" }} />
+
+      {/* Subtle noise texture overlay */}
+      <div className="fixed inset-0 z-[-7] opacity-[0.03] pointer-events-none bg-noise"></div>
+
+      {/* Floating orbs with parallax effect */}
+      {floatingOrbs.map((orb) => (
+        <div
+          key={`orb-${orb.id}`}
+          className="fixed pointer-events-none z-[-6]"
+          style={{
+            width: `${orb.size}px`,
+            height: `${orb.size}px`,
+            left: `${orb.x}%`,
+            top: `${orb.y}%`,
+            borderRadius: "50%",
+            background: isChorus 
+              ? `radial-gradient(circle, rgba(227, 74, 123, ${orb.opacity * 2}) 0%, rgba(227, 74, 123, 0) 70%)`
+              : `radial-gradient(circle, rgba(123, 58, 237, ${orb.opacity * 2}) 0%, rgba(123, 58, 237, 0) 70%)`,
+            filter: "blur(15px)",
+            transform: isMoving ? "translate(0, 0)" : "translate(0, 0)",
+            transition: "transform 0.5s ease",
+            animation: `float ${orb.duration}s ease-in-out ${orb.delay}s infinite alternate`
+          }}
+        />
+      ))}
+
+      {/* Subtle vignette effect */}
+      <div className="fixed inset-0 z-[-5] pointer-events-none shadow-vignette"></div>
+
+      {/* Audio reactive glow - central - enhanced */}
+      <div
+        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-96 z-[-4] pointer-events-none"
         style={{
-          background: `linear-gradient(to bottom, 
-            ${isChorus ? CONFIG.COLORS.CHORUS.BG_DARK : CONFIG.COLORS.VERSE.BG_DARK},
-            ${isChorus ? CONFIG.COLORS.CHORUS.BG_MID : CONFIG.COLORS.VERSE.BG_MID},
-            ${isChorus ? CONFIG.COLORS.CHORUS.BG_DARK : CONFIG.COLORS.VERSE.BG_DARK}
-          )`
+          opacity: isPlaying ? (isChorus ? 0.5 : 0.3) : 0.05,
+          background: `radial-gradient(circle, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.3) 0%, rgba(${isChorus ? "123,58,237" : "227,74,123"},0.15) 50%, rgba(0,0,0,0) 70%)`,
+          filter: "blur(30px)",
+          transform: `scale(${isPlaying ? (1 + (currentAudioIntensityRef.current - 1) * 0.1) : 1})`,
+          transition: "transform 0.2s ease-out"
         }}
       />
 
-      {/* 3D Canvas with optimized settings for device */}
-      <div className="fixed inset-0 z-[-9]">
-        <Canvas 
-          dpr={[1, isMobile ? 1.5 : 2]} 
-          camera={{ fov: isMobile ? 70 : 60 }}
-          gl={{ antialias: !isMobile, powerPreference: "high-performance" }}
-          performance={{ min: 0.5 }}
-        >
-          <SpaceScene 
-            audioIntensity={audioIntensity} 
-            isChorus={isChorus} 
-            isPlaying={isPlaying} 
-          />
-        </Canvas>
+      {/* Horizontal accent lines - enhanced */}
+      <div className="fixed inset-0 z-[-3] pointer-events-none" style={{ opacity: isPlaying ? 1 : 0 }}>
+        <div
+          className="absolute top-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary-500/20 to-transparent"
+          style={{
+            transform: isPlaying ? `translateY(${Math.sin(Date.now() * 0.001) * 5}px)` : "none",
+            opacity: isPlaying ? 0.7 + Math.sin(Date.now() * 0.0005) * 0.3 : 0.7,
+          }}
+        />
+
+        <div
+          className="absolute bottom-1/3 left-0 right-0 h-px bg-gradient-to-r from-transparent via-secondary-500/20 to-transparent"
+          style={{
+            transform: isPlaying ? `translateY(${Math.sin(Date.now() * 0.0008 + 1) * -5}px)` : "none",
+            opacity: isPlaying ? 0.7 + Math.sin(Date.now() * 0.0004 + 2) * 0.3 : 0.7,
+          }}
+        />
       </div>
 
-      {/* Noise texture for grain effect */}
-      <div className="fixed inset-0 z-[-8] opacity-[0.03] pointer-events-none bg-noise" />
-
-      {/* Vignette effect */}
-      <div className="fixed inset-0 z-[-7] pointer-events-none shadow-vignette" />
-
-      {/* Reactive center glow */}
-      <motion.div
-        className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-4xl h-96 z-[-6] pointer-events-none"
-        animate={glowControls}
-        initial={{ opacity: 0.3, scale: 1 }}
-        style={{
-          background: `radial-gradient(circle, rgba(${
-            isChorus ? "227,74,123" : "123,58,237"
-          },0.4) 0%, rgba(${isChorus ? "123,58,237" : "227,74,123"},0.2) 50%, rgba(0,0,0,0) 70%)`,
-          filter: "blur(40px)",
-        }}
-      />
-
-      {/* Nebula overlay with lyrics influence */}
-      <motion.div
-        className="fixed inset-0 z-[-5] pointer-events-none opacity-30 mix-blend-screen"
-        animate={nebulaControls}
-        initial={{ opacity: 0.2 }}
-      >
-        <div 
-          className="absolute inset-0 bg-nebula opacity-40" 
-          style={{ 
-            backgroundPositionX: `${lyricsInfluenceRef.current.x}px`, 
-            backgroundPositionY: `${lyricsInfluenceRef.current.y}px` 
-          }} 
-        />
-      </motion.div>
-
-      {/* Horizontal accent lines */}
-      {isPlaying && (
-        <div className="fixed inset-0 z-[-4] pointer-events-none">
-          <motion.div
-            className="absolute top-1/3 left-0 right-0 h-px"
+      {/* Dynamic chorus-specific effect - enhanced */}
+      {isChorus && (
+        <div className="fixed inset-0 z-[-2] pointer-events-none" style={{ opacity: 1 }}>
+          <div
+            className="absolute inset-0 bg-gradient-radial from-primary-500/10 via-secondary-500/5 to-transparent"
             style={{
-              background: `linear-gradient(to right, 
-                transparent, 
-                ${isChorus ? CONFIG.COLORS.CHORUS.PRIMARY : CONFIG.COLORS.VERSE.PRIMARY}40, 
-                transparent
-              )`
-            }}
-            animate={waveControls}
-          />
-          <motion.div
-            className="absolute bottom-1/3 left-0 right-0 h-px"
-            style={{
-              background: `linear-gradient(to right, 
-                transparent, 
-                ${isChorus ? CONFIG.COLORS.CHORUS.SECONDARY : CONFIG.COLORS.VERSE.SECONDARY}40, 
-                transparent
-              )`
-            }}
-            animate={{
-              y: [5, -5, 5],
-              opacity: [0.5, 0.8 * audioIntensity, 0.5],
-            }}
-            transition={{
-              duration: 8,
-              repeat: Infinity,
-              repeatType: "loop",
-              delay: 2,
+              transform: `scale(${1 + Math.sin(Date.now() * 0.0005) * 0.05})`,
+              opacity: 0.7 + Math.sin(Date.now() * 0.0003) * 0.15,
             }}
           />
         </div>
       )}
 
-      {/* Chorus-specific glow */}
-      <motion.div
-        className="fixed inset-0 z-[-3] pointer-events-none"
-        animate={chorusGlowControls}
-        initial={{ opacity: 0, scale: 0.9 }}
-      >
-        <motion.div
-          className="absolute inset-0"
-          style={{
-            background: `radial-gradient(circle, 
-              ${CONFIG.COLORS.CHORUS.PRIMARY}10 0%, 
-              ${CONFIG.COLORS.CHORUS.SECONDARY}05 50%, 
-              transparent 70%
-            )`
-          }}
-          animate={{
-            scale: [1, 1.05, 1],
-            opacity: [0.5, 0.7 * audioIntensity, 0.5],
-          }}
-          transition={{
-            duration: 4,
-            repeat: Infinity,
-            repeatType: "mirror",
-          }}
-        />
-      </motion.div>
-
-      {/* Bottom gradient */}
-      <motion.div
-        className="fixed bottom-0 left-0 right-0 z-[-2] pointer-events-none"
-        animate={{
-          opacity: isPlaying ? (isChorus ? 0.3 : 0.2) : 0.1,
-          height: isPlaying ? 100 : 60,
-        }}
-        transition={{ duration: 0.5 }}
+      {/* Audio reactive bottom gradient - enhanced */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-[-1] pointer-events-none"
         style={{
-          background: `linear-gradient(to top, rgba(${
-            isChorus ? "227,74,123" : "123,58,237"
-          },0.15) 0%, transparent 100%)`,
+          opacity: isPlaying ? 0.3 : 0.1,
+          height: isPlaying ? 100 + Math.sin(Date.now() * 0.0004) * 10 : 80,
+          background: `linear-gradient(to top, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.15) 0%, transparent 100%)`,
         }}
       />
     </>
