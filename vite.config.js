@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   server: {
-    host: true,     // bikin server bisa diakses dari device lain di jaringan
-    port: 3000,     // ganti port ke 3000
+    host: true,    
+    port: 3000,     
   },
 });
