@@ -1314,7 +1314,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
       duration: 10 + Math.random() * 40, // Longer animation duration
       delay: Math.random() * 10,
       opacity: 0.2 + Math.random() * 0.3, // Increased base opacity
-      blur: 8 + Math.random() * 12, // Reduced blur for sharper look
       hue: Math.random() > 0.5 ? "227, 74, 123" : "123, 58, 237", // Randomly pick colors
       speed: 0.5 + Math.random() * 0.5 // Animation speed factor
     }));
@@ -1329,7 +1328,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
       x: Math.random() * 100,
       y: Math.random() * 100,
       opacity: 0.3 + Math.random() * 0.5,
-      blur: 0.5 + Math.random() * 1.5,
       hue: Math.random() > 0.7 ? "227, 74, 123" : "123, 58, 237"
     }));
   }, [mobileMode]);
@@ -1346,7 +1344,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
         style={{ 
           opacity: isPlaying ? 1 : 0.7, 
           transition: "opacity 1s ease",
-          filter: "none" // Remove any default blur
         }} 
       />
 
@@ -1368,7 +1365,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
             top: `${dust.y}%`,
             borderRadius: "50%",
             background: `rgba(${dust.hue}, ${dust.opacity})`,
-            filter: `blur(${dust.blur}px)`,
             boxShadow: `0 0 ${dust.size * 2}px rgba(${dust.hue}, 0.8)`,
           }}
         />
@@ -1388,7 +1384,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
             background: isChorus 
               ? `radial-gradient(circle, rgba(${orb.hue}, ${orb.opacity * 2.5}) 0%, rgba(${orb.hue}, 0) 70%)`
               : `radial-gradient(circle, rgba(${orb.hue}, ${orb.opacity * 2.5}) 0%, rgba(${orb.hue}, 0) 70%)`,
-            filter: `blur(${orb.blur}px)`,
             transform: isMoving 
               ? `translate(${(mousePosition.x / window.innerWidth - 0.5) * -10 * orb.speed}px, ${(mousePosition.y / window.innerHeight - 0.5) * -10 * orb.speed}px)` 
               : "translate(0, 0)",
@@ -1410,7 +1405,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
         style={{
           opacity: isPlaying ? (isChorus ? 0.7 : 0.5) : 0.08,
           background: `radial-gradient(circle, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.35) 0%, rgba(${isChorus ? "123,58,237" : "227,74,123"},0.15) 50%, rgba(0,0,0,0) 70%)`,
-          filter: "blur(30px)",
           transform: `scale(${isPlaying ? (1 + (currentAudioIntensityRef.current - 1) * 0.2) : 1})`,
           transition: "transform 0.2s ease-out, opacity 0.5s ease",
           boxShadow: isChorus 
@@ -1466,7 +1460,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
                   background: 'linear-gradient(to top, rgba(227,74,123,0), rgba(227,74,123,1) 30%, rgba(227,74,123,0) 100%)',
                   transform: `translateX(-50%) translateY(-50%) rotate(${90 * i + Math.sin(Date.now() * 0.0003 * i) * 5}deg)`,
                   transformOrigin: 'center center',
-                  filter: 'blur(8px)',
                   boxShadow: '0 0 20px rgba(227,74,123,0.8)'
                 }}
               />
@@ -1482,7 +1475,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
           opacity: isPlaying ? 0.5 : 0.2,
           height: isPlaying ? 150 + Math.sin(Date.now() * 0.0004) * 20 : 100,
           background: `linear-gradient(to top, rgba(${isChorus ? "227,74,123" : "123,58,237"},0.25) 0%, transparent 100%)`,
-          filter: "blur(8px)",
           boxShadow: isChorus
             ? "0 -5px 30px rgba(227,74,123,0.4)"
             : "0 -5px 30px rgba(123,58,237,0.4)"
@@ -1496,7 +1488,6 @@ const Background = ({ isPlaying, audioLevel = [], currentLyric, isChorus }) => {
           opacity: isPlaying ? 0.3 : 0.15,
           height: isPlaying ? 100 + Math.sin(Date.now() * 0.0003) * 15 : 80,
           background: `linear-gradient(to bottom, rgba(${!isChorus ? "227,74,123" : "123,58,237"},0.2) 0%, transparent 100%)`,
-          filter: "blur(10px)",
           transform: `scaleY(${isPlaying ? (1 + (currentAudioIntensityRef.current - 1) * 0.1) : 1})`,
           transformOrigin: "top"
         }}
