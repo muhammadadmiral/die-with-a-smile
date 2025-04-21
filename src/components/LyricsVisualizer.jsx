@@ -949,46 +949,6 @@ const LyricsVisualizer = ({ currentTime, isPlaying, audioLevel = [] }) => {
           mixBlendMode: "overlay",
         }}
       />
-
-      {/* Floating accent dots - reduced for better performance */}
-      {isPlaying && !isLowPerfDevice && (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden z-1">
-          {/* Reduce number of dots on mobile */}
-          {Array.from({ length: isMobile ? 4 : 8 }).map((_, i) => (
-            <motion.div
-              key={`accent-${i}`}
-              className="absolute rounded-full"
-              initial={{
-                x: `${Math.random() * 100}%`,
-                y: `${Math.random() * 100}%`,
-                opacity: 0.1 + Math.random() * 0.2,
-                scale: 0.5 + Math.random() * 0.5,
-              }}
-              animate={{
-                x: `calc(${Math.random() * 100}% + ${Math.sin(i) * 50}px)`,
-                y: `calc(${Math.random() * 100}% + ${Math.cos(i) * 50}px)`,
-                opacity: [0.1 + Math.random() * 0.2, 0.2 + Math.random() * 0.3, 0.1 + Math.random() * 0.2],
-                scale: [0.5 + Math.random() * 0.5, 0.7 + Math.random() * 0.6, 0.5 + Math.random() * 0.5],
-              }}
-              transition={{
-                duration: 5 + Math.random() * 10,
-                repeat: Number.POSITIVE_INFINITY,
-                repeatType: "reverse",
-                ease: "easeInOut",
-              }}
-              style={{
-                width: `${4 + Math.random() * 6}px`,
-                height: `${4 + Math.random() * 6}px`,
-                background: isChorus
-                  ? `rgba(227, 74, 123, ${0.4 + Math.random() * 0.6})`
-                  : `rgba(123, 58, 237, ${0.4 + Math.random() * 0.6})`,
-                filter: `blur(${1 + Math.random() * 2}px)`,
-                boxShadow: isChorus ? `0 0 10px 2px rgba(227, 74, 123, 0.3)` : `0 0 10px 2px rgba(123, 58, 237, 0.3)`,
-              }}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 };
