@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { lyrics, chorusLines } from "../lib/utils"
+import { lyrics, isChorusLine } from "../lib/utils"
+import confetti from "canvas-confetti"
 
 import ErrorBoundary from "./ErrorBoundary"
-// Lazy load the background component to reduce initial load
-const Background = lazy(() => import('./Background'))
+import Background from "./Background"
 import AudioPlayer from "./AudioPlayer"
 import LyricsVisualizer from "./LyricsVisualizer"
 import CodeVisualizer from "./CodeVisualizer"
@@ -22,28 +22,67 @@ const DieWithASmile = () => {
   const [isMobile, setIsMobile] = useState(false)
   const [audioError, setAudioError] = useState(false)
   const [backgroundLoaded, setBackgroundLoaded] = useState(false)
-  const [backgroundMounted, setBackgroundMounted] = useState(true)
-  const [backgroundKey, setBackgroundKey] = useState(0) // Used to force remount if needed
+  const [showConfetti, setShowConfetti] = useState(false)
+  const [chorusTransition, setChorusTransition] = useState(false)
+  const [chorusCount, setChorusCount] = useState(0)
 
-  // Refs for performance
+  // Refs for performance optimization
   const lastActiveIndexRef = useRef(-1)
   const audioLevelTimestampRef = useRef(0)
   const animationFrameRef = useRef(null)
   const isMountedRef = useRef(true)
-  const recoveryAttemptsRef = useRef(0)
   const throttledAudioLevel = useRef([])
+  const resizeTimeoutRef = useRef(null)
+  const confettiCanvasRef = useRef(null)
+  const confettiInstanceRef = useRef(null)
+  const lastChorusTimeRef = useRef(0)
+  const prevIsChorusRef = useRef(false)
 
-  // Check for mobile devices
+  // Check for mobile devices with debounce
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768)
     }
 
     checkMobile()
-    window.addEventListener("resize", checkMobile)
+
+    // Debounced resize handler
+    const handleResize = () => {
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+      resizeTimeoutRef.current = setTimeout(checkMobile, 200)
+    }
+
+    window.addEventListener("resize", handleResize)
 
     return () => {
-      window.removeEventListener("resize", checkMobile)
+      window.removeEventListener("resize", handleResize)
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  // Initialize confetti
+  useEffect(() => {
+    // Create a canvas for confetti
+    const canvas = document.createElement("canvas")
+    canvas.className = "fixed inset-0 pointer-events-none z-30"
+    canvas.style.width = "100%"
+    canvas.style.height = "100%"
+    document.body.appendChild(canvas)
+
+    confettiCanvasRef.current = canvas
+    confettiInstanceRef.current = confetti.create(canvas, {
+      resize: true,
+      useWorker: true,
+    })
+
+    return () => {
+      if (canvas && canvas.parentNode) {
+        canvas.parentNode.removeChild(canvas)
+      }
     }
   }, [])
 
@@ -58,37 +97,8 @@ const DieWithASmile = () => {
     }
   }, [])
 
-  // Set up global WebGL context loss recovery
-  useEffect(() => {
-    const handleContextLost = () => {
-      console.warn("WebGL context lost - attempting recovery...")
-      
-      if (recoveryAttemptsRef.current < 3) {
-        // Try to recover by remounting the background component
-        setBackgroundMounted(false)
-        
-        setTimeout(() => {
-          recoveryAttemptsRef.current++
-          setBackgroundKey(prev => prev + 1)
-          setBackgroundMounted(true)
-        }, 1000)
-      } else {
-        // After multiple recovery attempts, show a simplified background
-        console.warn("Multiple recovery attempts failed - using fallback mode")
-        // We'll just keep the background mounted but with reduced features
-      }
-    }
-
-    window.addEventListener('webglcontextlost', handleContextLost)
-    
-    return () => {
-      window.removeEventListener('webglcontextlost', handleContextLost)
-    }
-  }, [])
-
-  // Find active lyric based on current time
+  // Find active lyric based on current time - optimized with binary search
   const findActiveLyric = useCallback((time) => {
-    // Binary search for better performance with sorted data
     let start = 0
     let end = lyrics.length - 1
     let result = -1
@@ -130,24 +140,98 @@ const DieWithASmile = () => {
         const lyricText = activeLyricData.text
 
         // Only update if index changed (prevents unnecessary re-renders)
-        if (lyricText !== activeLyric) {
+        if (lyricIndex !== lastActiveIndexRef.current) {
           lastActiveIndexRef.current = lyricIndex
           setActiveLyric(lyricText)
 
           // Check if this is a chorus line
-          const isChorusLine = chorusLines.some((line) => {
-            const lowerLyric = lyricText.toLowerCase()
-            const lowerLine = line.toLowerCase()
-            return lowerLyric.includes(lowerLine) || lowerLine.includes(lowerLyric)
-          })
-          
-          if (isChorusLine !== isChorus) {
-            setIsChorus(isChorusLine)
+          const chorusDetected = isChorusLine(lyricText)
+
+          // Detect transition to chorus
+          if (chorusDetected !== isChorus) {
+            setIsChorus(chorusDetected)
+
+            // If transitioning TO chorus, trigger effects
+            if (chorusDetected) {
+              setChorusTransition(true)
+              setChorusCount((prev) => prev + 1)
+
+              // Trigger confetti for chorus
+              if (confettiInstanceRef.current) {
+                const now = Date.now()
+                // Limit how often we trigger confetti (at least 5 seconds between)
+                if (now - lastChorusTimeRef.current > 5000) {
+                  lastChorusTimeRef.current = now
+
+                  // Different confetti patterns for different chorus sections
+                  if (chorusCount % 3 === 0) {
+                    // First chorus - celebratory burst
+                    confettiInstanceRef.current({
+                      particleCount: 100,
+                      spread: 70,
+                      origin: { y: 0.6 },
+                      colors: ["#e34a7b", "#7c3aed", "#ffffff"],
+                    })
+                  } else if (chorusCount % 3 === 1) {
+                    // Second chorus - side bursts
+                    confettiInstanceRef.current({
+                      particleCount: 50,
+                      angle: 60,
+                      spread: 55,
+                      origin: { x: 0, y: 0.65 },
+                      colors: ["#e34a7b", "#7c3aed", "#ffffff"],
+                    })
+
+                    setTimeout(() => {
+                      if (confettiInstanceRef.current) {
+                        confettiInstanceRef.current({
+                          particleCount: 50,
+                          angle: 120,
+                          spread: 55,
+                          origin: { x: 1, y: 0.65 },
+                          colors: ["#e34a7b", "#7c3aed", "#ffffff"],
+                        })
+                      }
+                    }, 300)
+                  } else {
+                    // Third chorus - firework effect
+                    const duration = 5 * 1000
+                    const animationEnd = Date.now() + duration
+                    const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 }
+
+                    const interval = setInterval(() => {
+                      const timeLeft = animationEnd - Date.now()
+
+                      if (timeLeft <= 0) {
+                        return clearInterval(interval)
+                      }
+
+                      const particleCount = 50 * (timeLeft / duration)
+
+                      // Since particles fall down, start a bit higher than random
+                      confettiInstanceRef.current({
+                        ...defaults,
+                        particleCount,
+                        origin: { x: Math.random(), y: Math.random() - 0.2 },
+                        colors: ["#e34a7b", "#ff6b9d", "#7c3aed", "#ffffff"],
+                      })
+                    }, 250)
+                  }
+                }
+              }
+
+              // Reset transition flag after a delay
+              setTimeout(() => {
+                if (isMountedRef.current) {
+                  setChorusTransition(false)
+                }
+              }, 2000)
+            }
           }
         }
       }
     },
-    [findActiveLyric, activeLyric, isChorus],
+    [findActiveLyric, isChorus],
   )
 
   // Handle play state change
@@ -156,7 +240,7 @@ const DieWithASmile = () => {
     setIsPlaying(playing)
   }, [])
 
-  // Handle audio level update with throttling to reduce workload
+  // Handle audio level update with throttling for better performance
   const handleAudioLevelUpdate = useCallback((levels) => {
     if (!isMountedRef.current) return
 
@@ -164,16 +248,18 @@ const DieWithASmile = () => {
     throttledAudioLevel.current = levels
 
     const now = performance.now()
-    // Only process audio data every 50ms to reduce load on WebGL context
+    // Only process audio data every 50ms to reduce load
     if (now - audioLevelTimestampRef.current > 50) {
       audioLevelTimestampRef.current = now
-      
+
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
 
       animationFrameRef.current = requestAnimationFrame(() => {
-        setAudioLevel(throttledAudioLevel.current)
+        if (isMountedRef.current) {
+          setAudioLevel(throttledAudioLevel.current)
+        }
       })
     }
   }, [])
@@ -217,26 +303,85 @@ const DieWithASmile = () => {
     setAudioError(true)
   }, [])
 
-  // Handle background loading
-  const handleBackgroundLoaded = useCallback(() => {
+  // Handle background load
+  const handleBackgroundLoad = useCallback(() => {
     setBackgroundLoaded(true)
   }, [])
 
   // Create a memoized subset of audio levels for the background
   // This helps reduce memory usage and processing for the WebGL context
   const optimizedAudioLevels = useCallback(() => {
-    if (!audioLevel || audioLevel.length === 0) return [];
-    
+    if (!audioLevel || audioLevel.length === 0) return []
+
     // Only send a subset of the audio data to reduce processing
-    const stride = Math.ceil(audioLevel.length / 16); // Only use 16 data points
-    const result = [];
-    
+    const stride = Math.ceil(audioLevel.length / 16) // Only use 16 data points
+    const result = []
+
     for (let i = 0; i < audioLevel.length; i += stride) {
-      result.push(audioLevel[i]);
+      result.push(audioLevel[i])
     }
-    
-    return result;
-  }, [audioLevel]);
+
+    return result
+  }, [audioLevel])
+
+  // Special chorus background effect
+  const ChorusBackground = useCallback(() => {
+    if (!isChorus) return null
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 0.3 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.5 }}
+        className="fixed inset-0 z-[-5] pointer-events-none"
+        style={{
+          background: `radial-gradient(circle at center, rgba(227, 74, 123, 0.2) 0%, rgba(123, 58, 237, 0.1) 50%, transparent 70%)`,
+          filter: "blur(40px)",
+        }}
+      />
+    )
+  }, [isChorus])
+
+  // Chorus transition effect
+  const ChorusTransitionEffect = useCallback(() => {
+    if (!chorusTransition) return null
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 0.8, scale: [1, 1.2, 0] }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 1.5 }}
+        className="fixed inset-0 z-30 pointer-events-none flex items-center justify-center"
+      >
+        <div className="relative w-full h-full">
+          {/* Central burst */}
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: [0, 1.5, 0] }}
+            transition={{ duration: 1.2 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 rounded-full"
+            style={{
+              background: `radial-gradient(circle, rgba(227, 74, 123, 0.7) 0%, rgba(227, 74, 123, 0) 70%)`,
+              filter: "blur(10px)",
+            }}
+          />
+
+          {/* Light rays */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: [0, 0.8, 0] }}
+            transition={{ duration: 1.5 }}
+            className="absolute inset-0"
+            style={{
+              background: `radial-gradient(circle at center, transparent 30%, rgba(227, 74, 123, 0.3) 70%)`,
+            }}
+          />
+        </div>
+      </motion.div>
+    )
+  }, [chorusTransition])
 
   return (
     <motion.div
@@ -244,53 +389,32 @@ const DieWithASmile = () => {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
+      style={{ transform: "translateZ(0)" }}
     >
-      {/* Background - Now with better error handling and performance optimizations */}
+      {/* Background */}
       <div className="fixed inset-0 z-[-1]">
         <ErrorBoundary>
-          <AnimatePresence mode="wait">
-            {backgroundMounted && (
-              <Suspense fallback={
-                <div className="w-full h-full bg-gradient-to-b from-gray-900 to-black flex items-center justify-center">
-                  <div className="w-16 h-16 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              }>
-                <Background 
-                  key={`background-${backgroundKey}`} 
-                  isPlaying={isPlaying} 
-                  audioLevel={optimizedAudioLevels()} 
-                  currentLyric={activeLyric} 
-                  isChorus={isChorus}
-                  onLoad={handleBackgroundLoaded}
-                  recoveryMode={recoveryAttemptsRef.current > 0}
-                />
-              </Suspense>
-            )}
-          </AnimatePresence>
+          <Background
+            isPlaying={isPlaying}
+            audioLevel={optimizedAudioLevels()}
+            currentLyric={activeLyric}
+            isChorus={isChorus}
+            isMobile={isMobile}
+            onLoad={handleBackgroundLoad}
+          />
         </ErrorBoundary>
       </div>
 
-      {/* Loading overlay */}
-      <AnimatePresence>
-        {!backgroundLoaded && (
-          <motion.div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black"
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.8 }}
-          >
-            <div className="text-center">
-              <div className="w-16 h-16 mb-4 mx-auto border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
-              <p className="text-xl">Loading experience...</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Special chorus background effect */}
+      <AnimatePresence>{isChorus && <ChorusBackground />}</AnimatePresence>
+
+      {/* Chorus transition effect */}
+      <AnimatePresence>{<ChorusTransitionEffect />}</AnimatePresence>
 
       {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: backgroundLoaded ? 1 : 0, y: backgroundLoaded ? 0 : -20 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.2 }}
         className="fixed top-0 left-0 right-0 z-40 pt-8 pb-4 px-6 text-center bg-gradient-to-b from-black/80 to-transparent"
       >
@@ -304,7 +428,7 @@ const DieWithASmile = () => {
 
       {/* Lyrics Visualizer - Center of screen */}
       <ErrorBoundary>
-        <LyricsVisualizer currentTime={currentTime} isPlaying={isPlaying} audioLevel={audioLevel} />
+        <LyricsVisualizer currentTime={currentTime} isPlaying={isPlaying} audioLevel={audioLevel} isMobile={isMobile} />
       </ErrorBoundary>
 
       {/* Code Visualizer - Below header */}
@@ -321,7 +445,7 @@ const DieWithASmile = () => {
       {/* Audio player - Always visible at bottom */}
       <motion.div
         initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: backgroundLoaded ? 1 : 0, y: backgroundLoaded ? 0 : 50 }}
+        animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, delay: 0.3 }}
         className="fixed bottom-0 left-0 right-0 z-40 p-4 bg-gradient-to-t from-black/80 to-transparent"
       >
@@ -376,21 +500,6 @@ const DieWithASmile = () => {
           </button>
         </div>
       )}
-
-      {/* WebGL Context recovery message */}
-      <AnimatePresence>
-        {recoveryAttemptsRef.current > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-black/80 px-4 py-2 rounded-lg text-white text-center"
-          >
-            <p className="text-sm">Optimizing visuals for your device...</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Keyboard shortcut hint */}
       {isPlaying && (
