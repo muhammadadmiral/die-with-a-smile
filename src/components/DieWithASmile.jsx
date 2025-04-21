@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from "react"
-import { motion } from "framer-motion"
+import { useState, useRef, useEffect, useCallback, Suspense, lazy } from "react"
+import { motion, AnimatePresence } from "framer-motion"
 import { lyrics, chorusLines } from "../lib/utils"
 
 import ErrorBoundary from "./ErrorBoundary"
-import Background from "./Background"
+// Lazy load the background component to reduce initial load
+const Background = lazy(() => import('./Background'))
 import AudioPlayer from "./AudioPlayer"
 import LyricsVisualizer from "./LyricsVisualizer"
 import CodeVisualizer from "./CodeVisualizer"
@@ -20,11 +21,17 @@ const DieWithASmile = () => {
   const [isChorus, setIsChorus] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [audioError, setAudioError] = useState(false)
+  const [backgroundLoaded, setBackgroundLoaded] = useState(false)
+  const [backgroundMounted, setBackgroundMounted] = useState(true)
+  const [backgroundKey, setBackgroundKey] = useState(0) // Used to force remount if needed
 
   // Refs for performance
   const lastActiveIndexRef = useRef(-1)
+  const audioLevelTimestampRef = useRef(0)
   const animationFrameRef = useRef(null)
   const isMountedRef = useRef(true)
+  const recoveryAttemptsRef = useRef(0)
+  const throttledAudioLevel = useRef([])
 
   // Check for mobile devices
   useEffect(() => {
@@ -46,7 +53,36 @@ const DieWithASmile = () => {
       isMountedRef.current = false
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
       }
+    }
+  }, [])
+
+  // Set up global WebGL context loss recovery
+  useEffect(() => {
+    const handleContextLost = () => {
+      console.warn("WebGL context lost - attempting recovery...")
+      
+      if (recoveryAttemptsRef.current < 3) {
+        // Try to recover by remounting the background component
+        setBackgroundMounted(false)
+        
+        setTimeout(() => {
+          recoveryAttemptsRef.current++
+          setBackgroundKey(prev => prev + 1)
+          setBackgroundMounted(true)
+        }, 1000)
+      } else {
+        // After multiple recovery attempts, show a simplified background
+        console.warn("Multiple recovery attempts failed - using fallback mode")
+        // We'll just keep the background mounted but with reduced features
+      }
+    }
+
+    window.addEventListener('webglcontextlost', handleContextLost)
+    
+    return () => {
+      window.removeEventListener('webglcontextlost', handleContextLost)
     }
   }, [])
 
@@ -94,7 +130,7 @@ const DieWithASmile = () => {
         const lyricText = activeLyricData.text
 
         // Only update if index changed (prevents unnecessary re-renders)
-        if (lyricIndex !== lastActiveIndexRef.current) {
+        if (lyricText !== activeLyric) {
           lastActiveIndexRef.current = lyricIndex
           setActiveLyric(lyricText)
 
@@ -104,11 +140,14 @@ const DieWithASmile = () => {
             const lowerLine = line.toLowerCase()
             return lowerLyric.includes(lowerLine) || lowerLine.includes(lowerLyric)
           })
-          setIsChorus(isChorusLine)
+          
+          if (isChorusLine !== isChorus) {
+            setIsChorus(isChorusLine)
+          }
         }
       }
     },
-    [findActiveLyric],
+    [findActiveLyric, activeLyric, isChorus],
   )
 
   // Handle play state change
@@ -117,17 +156,26 @@ const DieWithASmile = () => {
     setIsPlaying(playing)
   }, [])
 
-  // Handle audio level update with throttling for better performance
+  // Handle audio level update with throttling to reduce workload
   const handleAudioLevelUpdate = useCallback((levels) => {
     if (!isMountedRef.current) return
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current)
-    }
+    // Store the latest audio levels, but only update state periodically
+    throttledAudioLevel.current = levels
 
-    animationFrameRef.current = requestAnimationFrame(() => {
-      setAudioLevel(levels)
-    })
+    const now = performance.now()
+    // Only process audio data every 50ms to reduce load on WebGL context
+    if (now - audioLevelTimestampRef.current > 50) {
+      audioLevelTimestampRef.current = now
+      
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+
+      animationFrameRef.current = requestAnimationFrame(() => {
+        setAudioLevel(throttledAudioLevel.current)
+      })
+    }
   }, [])
 
   // Handle duration update
@@ -169,26 +217,81 @@ const DieWithASmile = () => {
     setAudioError(true)
   }, [])
 
+  // Handle background loading
+  const handleBackgroundLoaded = useCallback(() => {
+    setBackgroundLoaded(true)
+  }, [])
+
+  // Create a memoized subset of audio levels for the background
+  // This helps reduce memory usage and processing for the WebGL context
+  const optimizedAudioLevels = useCallback(() => {
+    if (!audioLevel || audioLevel.length === 0) return [];
+    
+    // Only send a subset of the audio data to reduce processing
+    const stride = Math.ceil(audioLevel.length / 16); // Only use 16 data points
+    const result = [];
+    
+    for (let i = 0; i < audioLevel.length; i += stride) {
+      result.push(audioLevel[i]);
+    }
+    
+    return result;
+  }, [audioLevel]);
+
   return (
     <motion.div
       className="relative min-h-screen overflow-hidden"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 1 }}
-      style={{ transform: "translateZ(0)" }}
     >
-      {/* Background - Make sure it fills the entire screen */}
+      {/* Background - Now with better error handling and performance optimizations */}
       <div className="fixed inset-0 z-[-1]">
         <ErrorBoundary>
-          <Background isPlaying={isPlaying} audioLevel={audioLevel} currentLyric={activeLyric} isChorus={isChorus} />
+          <AnimatePresence mode="wait">
+            {backgroundMounted && (
+              <Suspense fallback={
+                <div className="w-full h-full bg-gradient-to-b from-gray-900 to-black flex items-center justify-center">
+                  <div className="w-16 h-16 border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              }>
+                <Background 
+                  key={`background-${backgroundKey}`} 
+                  isPlaying={isPlaying} 
+                  audioLevel={optimizedAudioLevels()} 
+                  currentLyric={activeLyric} 
+                  isChorus={isChorus}
+                  onLoad={handleBackgroundLoaded}
+                  recoveryMode={recoveryAttemptsRef.current > 0}
+                />
+              </Suspense>
+            )}
+          </AnimatePresence>
         </ErrorBoundary>
       </div>
+
+      {/* Loading overlay */}
+      <AnimatePresence>
+        {!backgroundLoaded && (
+          <motion.div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            <div className="text-center">
+              <div className="w-16 h-16 mb-4 mx-auto border-4 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-xl">Loading experience...</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
+        animate={{ opacity: backgroundLoaded ? 1 : 0, y: backgroundLoaded ? 0 : -20 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
         className="fixed top-0 left-0 right-0 z-40 pt-8 pb-4 px-6 text-center bg-gradient-to-b from-black/80 to-transparent"
       >
         <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-1 tracking-tight bg-gradient-to-r from-white via-primary-300 to-secondary-300 text-transparent bg-clip-text">
@@ -218,8 +321,8 @@ const DieWithASmile = () => {
       {/* Audio player - Always visible at bottom */}
       <motion.div
         initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
+        animate={{ opacity: backgroundLoaded ? 1 : 0, y: backgroundLoaded ? 0 : 50 }}
+        transition={{ duration: 0.3, delay: 0.3 }}
         className="fixed bottom-0 left-0 right-0 z-40 p-4 bg-gradient-to-t from-black/80 to-transparent"
       >
         <ErrorBoundary>
@@ -274,6 +377,21 @@ const DieWithASmile = () => {
         </div>
       )}
 
+      {/* WebGL Context recovery message */}
+      <AnimatePresence>
+        {recoveryAttemptsRef.current > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
+            className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-black/80 px-4 py-2 rounded-lg text-white text-center"
+          >
+            <p className="text-sm">Optimizing visuals for your device...</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Keyboard shortcut hint */}
       {isPlaying && (
         <motion.div
@@ -293,66 +411,6 @@ const DieWithASmile = () => {
           </motion.div>
         </motion.div>
       )}
-
-      {/* Global styles */}
-      <style jsx global>{`
-        body {
-          margin: 0;
-          padding: 0;
-          overflow: hidden;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans",
-            "Helvetica Neue", sans-serif;
-          background-color: #000;
-          color: #fff;
-        }
-
-        .text-gradient {
-          background: linear-gradient(to right, #e34a7b, #7c3aed);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-
-        .text-gradient-gold {
-          background: linear-gradient(to right, #fff, #f0f0f0);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-
-        .text-shadow-gold {
-          text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
-        }
-
-        .glass-dark {
-          background: rgba(15, 15, 20, 0.6);
-          backdrop-filter: blur(10px);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .glitch {
-          animation: glitch 0.3s linear;
-        }
-
-        @keyframes glitch {
-          0% {
-            transform: translate(0);
-          }
-          20% {
-            transform: translate(-2px, 2px);
-          }
-          40% {
-            transform: translate(-2px, -2px);
-          }
-          60% {
-            transform: translate(2px, 2px);
-          }
-          80% {
-            transform: translate(2px, -2px);
-          }
-          100% {
-            transform: translate(0);
-          }
-        }
-      `}</style>
     </motion.div>
   )
 }
